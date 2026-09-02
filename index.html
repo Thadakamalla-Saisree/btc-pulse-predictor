@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BTC Pulse | 5-Minute Real-Time Quant Predictor</title>
+  <meta name="description" content="Institutional-grade real-time Bitcoin 5-minute price prediction terminal analyzing order flow and technical indicators every second." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app" class="app-container">
+    <!-- Top Navigation / Ticker Bar -->
+    <header class="top-nav">
+      <div class="brand-section">
+        <div class="logo-mark">
+          <span class="pulse-ring"></span>
+          <span class="pulse-dot"></span>
+        </div>
+        <div class="brand-titles">
+          <div class="brand-name">BTC PULSE <span class="brand-badge">5M QUANT</span></div>
+          <div class="brand-sub">HIGH-FREQUENCY ALGORITHMIC PREDICTOR</div>
+        </div>
+      </div>
+
+      <!-- Live BTC Ticker Feed -->
+      <div class="ticker-metrics">
+        <div class="metric-card price-metric">
+          <span class="metric-label">BTC / USDT LIVE</span>
+          <div class="metric-value-row">
+            <span id="live-btc-price" class="metric-value price-flash">$--,---.--</span>
+            <span id="live-price-change" class="change-pill neutral">0.00%</span>
+          </div>
+        </div>
+
+        <div class="metric-card hide-mobile">
+          <span class="metric-label">24H HIGH / LOW</span>
+          <div class="metric-value-row">
+            <span id="ticker-24h-high" class="stat-high">$--,---</span>
+            <span class="stat-divider">/</span>
+            <span id="ticker-24h-low" class="stat-low">$--,---</span>
+          </div>
+        </div>
+
+        <div class="metric-card hide-mobile">
+          <span class="metric-label">NETWORK & ENGINE</span>
+          <div class="metric-value-row">
+            <span id="ws-status-badge" class="status-indicator-pill live">
+              <span class="status-dot"></span>
+              <span id="ws-status-text">CONNECTING</span>
+            </span>
+            <span id="ws-latency" class="latency-text">--ms</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Header Action Controls -->
+      <div class="nav-actions">
+        <button id="audio-toggle-btn" class="icon-btn" title="Toggle Futuristic Sound">
+          <svg id="sound-icon-on" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+          <svg id="sound-icon-off" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+        </button>
+        <div class="time-clock" id="live-utc-clock">--:--:-- UTC</div>
+      </div>
+    </header>
+
+    <!-- Main Workspace Layout -->
+    <main class="main-content">
+      <!-- Upper Arena: 5-Minute Round Card + AI Quant Brain & Bankroll -->
+      <section class="prediction-arena-grid">
+        
+        <!-- Centerpiece: The 5-Minute Round Battle Card -->
+        <div class="card round-hero-card" id="round-hero-card">
+          <div class="round-card-header">
+            <div class="round-id-wrap">
+              <span class="round-live-tag">LIVE ROUND</span>
+              <h2 id="round-title-id" class="round-id">ROUND #-----</h2>
+            </div>
+            <div class="round-timer-badge">
+              <span class="pulse-blip"></span>
+              <span>5-MIN EXPIRY WINDOW</span>
+            </div>
+          </div>
+
+          <div class="round-card-body">
+            <!-- Circular Radial Countdown Timer -->
+            <div class="countdown-radial-section">
+              <div class="radial-timer-container">
+                <svg class="radial-svg" viewBox="0 0 140 140">
+                  <circle class="radial-bg-circle" cx="70" cy="70" r="62"></circle>
+                  <circle id="radial-progress-circle" class="radial-fg-circle" cx="70" cy="70" r="62"></circle>
+                </svg>
+                <div class="radial-timer-content">
+                  <span id="countdown-digits" class="countdown-time">05:00</span>
+                  <span class="countdown-sub">TIME LEFT</span>
+                </div>
+              </div>
+
+              <!-- Prices Breakdown (Lock vs Live) -->
+              <div class="price-comparator">
+                <div class="price-box lock-box">
+                  <div class="box-label">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                    STRIKE / LOCK PRICE
+                  </div>
+                  <div id="round-lock-price" class="box-value strike-color">$--,---.--</div>
+                  <div class="box-sub">Locked at round start</div>
+                </div>
+
+                <div class="price-arrow-divider">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+
+                <div class="price-box live-box">
+                  <div class="box-label">
+                    <span class="pulse-dot-sm"></span>
+                    CURRENT LIVE PRICE
+                  </div>
+                  <div id="round-live-price" class="box-value">$--,---.--</div>
+                  <div id="round-price-delta" class="delta-badge neutral">+$0.00 (0.00%)</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Big Prediction Hero Badge -->
+            <div id="prediction-banner" class="prediction-banner banner-up">
+              <div class="prediction-accent-glow"></div>
+              <div class="banner-top-row">
+                <div class="prediction-direction-tag">
+                  <span id="prediction-icon" class="pred-symbol">▲</span>
+                  <span class="pred-label">OFFICIAL PREDICTION:</span>
+                  <span id="prediction-direction" class="pred-direction">UP (CALL)</span>
+                </div>
+                <div class="confidence-tag">
+                  <span class="conf-label">CONVICTION</span>
+                  <span id="prediction-confidence" class="conf-value">--%</span>
+                </div>
+              </div>
+
+              <div class="banner-bottom-row">
+                <div class="target-corridor">
+                  <span class="corridor-label">PROJECTED 5M TARGET:</span>
+                  <span id="prediction-target-price" class="target-value">$--,---.--</span>
+                </div>
+                <div id="prediction-status-tag" class="prediction-status-pill winning">
+                  <span class="status-icon">●</span>
+                  <span id="prediction-status-text">ON TRACK</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Real-Time Dynamic Probability Bar -->
+            <div class="probability-meter-wrap">
+              <div class="meter-labels">
+                <span class="prob-label up-label"><span class="arrow-up">▲</span> UP PROBABILITY: <strong id="prob-up-text">50%</strong></span>
+                <span class="prob-label down-label"><strong id="prob-down-text">50%</strong> DOWN PROBABILITY <span class="arrow-down">▼</span></span>
+              </div>
+              <div class="probability-track">
+                <div id="probability-bar-fill" class="prob-bar-up" style="width: 50%;"></div>
+              </div>
+              <div class="meter-caption">Live probability dynamically recalculated every second using order flow velocity & Brownian drift</div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Right Side: AI Trader Brain & Live Signal Matrix -->
+        <div class="card trader-brain-card">
+          <div class="card-header">
+            <div class="header-with-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 0 1 10 10c0 5.52-4.48 10-10 10S2 17.52 2 12A10 10 0 0 1 12 2z"></path><path d="M12 6v6l4 2"></path></svg>
+              <h3>QUANT TRADER BRAIN</h3>
+            </div>
+            <span class="live-scan-badge"><span class="ping-dot"></span> LIVE 1s SCAN</span>
+          </div>
+
+          <!-- Multi-factor Indicator Gauge Matrix -->
+          <div class="indicator-matrix">
+            <div class="indicator-pill" id="pill-rsi">
+              <div class="pill-header">
+                <span class="ind-name">RSI (14)</span>
+                <span id="val-rsi" class="ind-val">52.4</span>
+              </div>
+              <div class="pill-bar-track"><div id="bar-rsi" class="pill-bar-fill" style="width: 52%;"></div></div>
+              <span id="badge-rsi" class="ind-badge neutral">NEUTRAL</span>
+            </div>
+
+            <div class="indicator-pill" id="pill-macd">
+              <div class="pill-header">
+                <span class="ind-name">MACD MOMENTUM</span>
+                <span id="val-macd" class="ind-val">+4.8</span>
+              </div>
+              <div class="pill-bar-track"><div id="bar-macd" class="pill-bar-fill bull" style="width: 65%;"></div></div>
+              <span id="badge-macd" class="ind-badge bull">BULL CROSS</span>
+            </div>
+
+            <div class="indicator-pill" id="pill-ema">
+              <div class="pill-header">
+                <span class="ind-name">EMA RIBBON</span>
+                <span id="val-ema" class="ind-val">9 > 21 > 50</span>
+              </div>
+              <div class="pill-bar-track"><div id="bar-ema" class="pill-bar-fill bull" style="width: 80%;"></div></div>
+              <span id="badge-ema" class="ind-badge bull">BULL TREND</span>
+            </div>
+
+            <div class="indicator-pill" id="pill-cvd">
+              <div class="pill-header">
+                <span class="ind-name">ORDER FLOW CVD</span>
+                <span id="val-cvd" class="ind-val">+0.18</span>
+              </div>
+              <div class="pill-bar-track"><div id="bar-cvd" class="pill-bar-fill bull" style="width: 72%;"></div></div>
+              <span id="badge-cvd" class="ind-badge bull">BUY PRESSURE</span>
+            </div>
+          </div>
+
+          <!-- Trader Rationale Stream -->
+          <div class="rationale-section">
+            <div class="rationale-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+              WHY THE AI ISSUED THIS PREDICTION:
+            </div>
+            <ul id="trader-rationale-list" class="rationale-list">
+              <li>Analyzing order book flow and multi-timeframe moving averages...</li>
+            </ul>
+          </div>
+
+          <!-- Simulated Paper Trading & Bankroll -->
+          <div class="bankroll-box">
+            <div class="bankroll-top">
+              <div>
+                <span class="bankroll-label">SIMULATED BANKROLL</span>
+                <div id="bankroll-balance" class="bankroll-value">$10,000.00</div>
+              </div>
+              <div class="bankroll-stats">
+                <div class="b-stat">
+                  <span class="b-label">ACCURACY</span>
+                  <span id="bankroll-winrate" class="b-val highlight-green">--%</span>
+                </div>
+                <div class="b-stat">
+                  <span class="b-label">STREAK</span>
+                  <span id="bankroll-streak" class="b-val">🔥 0</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bankroll-controls">
+              <div class="stake-input-wrap">
+                <label for="round-stake-input">STAKE / ROUND</label>
+                <div class="input-with-symbol">
+                  <span>$</span>
+                  <input type="number" id="round-stake-input" value="100" min="10" max="5000" step="10" />
+                </div>
+              </div>
+
+              <div class="autotrade-toggle-wrap">
+                <span class="toggle-title">AUTO-FOLLOW AI</span>
+                <button id="autotrade-btn" class="toggle-btn inactive">
+                  <span class="toggle-knob"></span>
+                  <span id="autotrade-label">OFF</span>
+                </button>
+              </div>
+
+              <button id="reset-bankroll-btn" class="reset-btn" title="Reset bankroll to $10,000">RESET</button>
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- TradingView Interactive Candlestick Chart -->
+      <section class="chart-section card">
+        <div class="chart-header">
+          <div class="chart-title-group">
+            <h3>BTC/USDT REAL-TIME CANDLESTICK CHART</h3>
+            <span class="chart-subtitle">Direct Binance Tick Feed with Strike & Target Overlays</span>
+          </div>
+
+          <div class="chart-controls">
+            <div class="tf-selector">
+              <button class="tf-btn active" data-tf="1m">1M (TICKS)</button>
+              <button class="tf-btn" data-tf="5m">5M (ROUNDS)</button>
+            </div>
+            <div class="legend-badges">
+              <span class="legend-badge strike"><span class="legend-line strike-line"></span> STRIKE LOCK</span>
+              <span class="legend-badge target"><span class="legend-line target-line"></span> TARGET</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Lightweight Charts Canvas Container -->
+        <div id="tv-chart-container" class="chart-canvas-container"></div>
+      </section>
+
+      <!-- Verifiable 5-Minute Round History -->
+      <section class="history-section card">
+        <div class="history-header">
+          <div class="header-with-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <h3>VERIFIABLE 5-MINUTE ROUND HISTORY & ACCURACY</h3>
+          </div>
+          <div class="history-summary-stats">
+            <span class="summary-pill">TOTAL ROUNDS: <strong id="hist-total-rounds">0</strong></span>
+            <span class="summary-pill win-pill">WINS: <strong id="hist-total-wins">0</strong></span>
+            <span class="summary-pill loss-pill">LOSSES: <strong id="hist-total-losses">0</strong></span>
+            <span class="summary-pill pnl-pill">NET PNL: <strong id="hist-total-pnl">+$0.00</strong></span>
+          </div>
+        </div>
+
+        <div class="history-table-container">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>ROUND ID</th>
+                <th>EXPIRY TIME</th>
+                <th>LOCK PRICE</th>
+                <th>CLOSE PRICE</th>
+                <th>DELTA</th>
+                <th>PREDICTION</th>
+                <th>ACTUAL</th>
+                <th>OUTCOME</th>
+                <th>SIM PNL</th>
+              </tr>
+            </thead>
+            <tbody id="history-table-body">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <div class="footer-left">
+        <span class="engine-tag">QUANTUM 5M CORE v2.4</span>
+        <span>Real-time technical analysis engine for educational & algorithmic trading simulation.</span>
+      </div>
+      <div class="footer-right">
+        <span class="heartbeat-pulse"></span>
+        <span>ALL SYSTEMS OPERATIONAL · 1s STREAMING TICK CLUSTERING</span>
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
