@@ -2,6 +2,7 @@
 // Main Application Coordinator for BTC Pulse Predictor
 
 import { dataService } from './services/dataService.js';
+import { chainlinkService } from './services/chainlinkService.js';
 import { predictorEngine } from './engine/predictor.js';
 import { roundManager } from './engine/roundManager.js';
 import { audioService } from './services/audioService.js';
@@ -81,7 +82,11 @@ class App {
     // 7. Connect Binance Live Streams
     dataService.connectWebSocket();
 
-    // 8. Initial History & Bankroll Render
+    // 8. Initialize Chainlink Oracle & Snipe Intelligence
+    chainlinkService.start(() => this.prevPrice || 75000);
+    chainlinkService.subscribe((data) => this.renderChainlinkOracle(data));
+
+    // 9. Initial History & Bankroll Render
     this.renderHistory(roundManager.history);
     this.renderBankroll(roundManager.getStats());
   }
@@ -141,6 +146,15 @@ class App {
       valCvd: document.getElementById('val-cvd'),
       barCvd: document.getElementById('bar-cvd'),
       badgeCvd: document.getElementById('badge-cvd'),
+      valChainlink: document.getElementById('val-chainlink'),
+      barChainlink: document.getElementById('bar-chainlink'),
+      badgeChainlink: document.getElementById('badge-chainlink'),
+      clOraclePrice: document.getElementById('cl-oracle-price'),
+      clUpdateTime: document.getElementById('cl-update-time'),
+      clOracleDrift: document.getElementById('cl-oracle-drift'),
+      clDriftStatus: document.getElementById('cl-drift-status'),
+      clSnipeBadge: document.getElementById('cl-snipe-badge'),
+      clSnipeStatus: document.getElementById('cl-snipe-status'),
       rationaleList: document.getElementById('trader-rationale-list'),
 
       // Bankroll
@@ -448,6 +462,60 @@ class App {
     this.dom.probUpText.textContent = `${round.liveProb.upProb}%`;
     this.dom.probDownText.textContent = `${round.liveProb.downProb}%`;
     this.dom.probBarFill.style.width = `${round.liveProb.upProb}%`;
+
+    // 5. Chainlink Oracle Snipe Integration
+    if (round.liveProb && round.liveProb.chainlinkSnipe && this.dom.clSnipeBadge) {
+      const snipe = round.liveProb.chainlinkSnipe;
+      if (snipe.isSnipeActive) {
+        const isUp = snipe.snipeDirection === 'UP';
+        this.dom.clSnipeBadge.className = isUp ? 'snipe-badge active' : 'snipe-badge active-bear';
+        this.dom.clSnipeStatus.textContent = `🔥 ACTIVE: ${snipe.snipeDirection} (${snipe.snipeConfidence}%)`;
+        this.dom.predictionGrade.textContent = 'GRADE A+ (CHAINLINK SNIPE)';
+        this.dom.predictionGrade.className = 'conviction-grade-pill grade-a-plus';
+        this.dom.predictionConf.textContent = `${snipe.snipeConfidence}%`;
+        this.dom.predictionDir.textContent = isUp ? 'UP (CALL)' : 'DOWN (PUT)';
+        this.dom.predictionIcon.textContent = isUp ? '▲' : '▼';
+        this.dom.predictionBanner.className = `prediction-banner ${isUp ? 'banner-up' : 'banner-down'}`;
+      } else if (round.secondsRemaining <= 65) {
+        this.dom.clSnipeBadge.className = 'snipe-badge waiting';
+        this.dom.clSnipeStatus.textContent = `EVALUATING (T-${round.secondsRemaining}s)`;
+      } else {
+        this.dom.clSnipeBadge.className = 'snipe-badge waiting';
+        const minsLeft = Math.floor(round.secondsRemaining / 60);
+        const secsLeft = round.secondsRemaining % 60;
+        this.dom.clSnipeStatus.textContent = `UNLOCKS AT T-60s (${minsLeft}m ${secsLeft}s)`;
+      }
+    }
+  }
+
+  renderChainlinkOracle(data) {
+    if (!data) return;
+    if (this.dom.clOraclePrice) {
+      this.dom.clOraclePrice.textContent = `$${data.chainlinkPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    if (this.dom.clUpdateTime) {
+      this.dom.clUpdateTime.textContent = `${data.oracleHeartbeatSec}s AGO (${data.lastUpdated})`;
+    }
+    if (this.dom.clOracleDrift) {
+      const isLead = data.drift > 0;
+      const isLag = data.drift < 0;
+      this.dom.clOracleDrift.textContent = `${isLead ? '+' : ''}$${data.drift.toFixed(2)} (${isLead ? '+' : ''}${data.driftBps} bps)`;
+      this.dom.clOracleDrift.className = `drift-val ${isLead ? 'bull' : (isLag ? 'bear' : 'neutral')}`;
+
+      if (Math.abs(data.drift) >= 5) {
+        this.dom.clDriftStatus.textContent = isLead ? 'BINANCE LEADING 🟢' : 'ORACLE LAGGING 🔴';
+        this.dom.clDriftStatus.className = `drift-status ${isLead ? 'lead' : 'lag'}`;
+      } else {
+        this.dom.clDriftStatus.textContent = 'IN SYNC ⚖️';
+        this.dom.clDriftStatus.className = 'drift-status sync';
+      }
+    }
+
+    if (this.dom.valChainlink) {
+      this.dom.valChainlink.textContent = `$${data.chainlinkPrice.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+      this.dom.badgeChainlink.textContent = data.drift > 0 ? 'BULL DRIFT' : (data.drift < 0 ? 'BEAR DRIFT' : 'SYNCED');
+      this.dom.badgeChainlink.className = `ind-badge ${data.drift > 0 ? 'bull' : (data.drift < 0 ? 'bear' : 'neutral')}`;
+    }
   }
 
   renderRoundSettled(result, history) {

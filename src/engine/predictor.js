@@ -2,6 +2,7 @@
 // Institutional Adaptive Multi-Timeframe Quant Decision Engine
 
 import { IndicatorsEngine } from './indicators.js';
+import { chainlinkService } from '../services/chainlinkService.js';
 
 export class PredictorEngine {
   constructor() {
@@ -294,7 +295,7 @@ export class PredictorEngine {
 
   calculateLiveProbability(lockPrice, currentPrice, prediction, secondsRemaining, atr = 30) {
     if (!lockPrice || lockPrice <= 0 || !currentPrice) {
-      return { upProb: 50, downProb: 50, isPredictionWinning: true, currentDelta: 0, currentDeltaPercent: 0 };
+      return { upProb: 50, downProb: 50, isPredictionWinning: true, currentDelta: 0, currentDeltaPercent: 0, chainlinkSnipe: null };
     }
 
     const priceDelta = currentPrice - lockPrice;
@@ -308,12 +309,21 @@ export class PredictorEngine {
     upProb = Math.min(98, Math.max(2, upProb));
     const downProb = 100 - upProb;
 
+    // Chainlink Oracle Snipe Intelligence
+    const snipe = chainlinkService.analyzeOracleSnipe({
+      lockPrice,
+      currentPrice,
+      secondsRemaining,
+      atr
+    });
+
     return {
       upProb,
       downProb,
       isPredictionWinning: prediction === 'UP' ? currentPrice >= lockPrice : currentPrice <= lockPrice,
       currentDelta: parseFloat(priceDelta.toFixed(2)),
-      currentDeltaPercent: parseFloat(((priceDelta / lockPrice) * 100).toFixed(3))
+      currentDeltaPercent: parseFloat(((priceDelta / lockPrice) * 100).toFixed(3)),
+      chainlinkSnipe: snipe
     };
   }
 

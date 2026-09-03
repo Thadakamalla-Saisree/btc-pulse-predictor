@@ -133,6 +133,37 @@
               </div>
             </div>
 
+            <!-- Chainlink Oracle & Snipe Intelligence Module -->
+            <div class="chainlink-oracle-bar" id="chainlink-oracle-bar">
+              <div class="oracle-feed-left">
+                <div class="oracle-badge">
+                  <span class="chainlink-icon">🔗</span>
+                  <span class="oracle-name">CHAINLINK ORACLE</span>
+                  <span class="oracle-live-dot"></span>
+                </div>
+                <div class="oracle-price-row">
+                  <span id="cl-oracle-price" class="oracle-val">$--,---.--</span>
+                  <span id="cl-update-time" class="oracle-time">LIVE FEED</span>
+                </div>
+              </div>
+
+              <div class="oracle-drift-center">
+                <div class="drift-header">BINANCE vs CHAINLINK DRIFT</div>
+                <div id="cl-oracle-drift" class="drift-val neutral">+$0.00 (0.0 bps)</div>
+                <div id="cl-drift-status" class="drift-status">IN SYNC</div>
+              </div>
+
+              <div class="oracle-snipe-right">
+                <div id="cl-snipe-badge" class="snipe-badge waiting">
+                  <span class="snipe-icon">🎯</span>
+                  <div class="snipe-details">
+                    <span class="snipe-title">SNIPE ZONE</span>
+                    <span id="cl-snipe-status" class="snipe-text">UNLOCKS AT T-60s</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Big Prediction Hero Badge -->
             <div id="prediction-banner" class="prediction-banner banner-up">
               <div class="prediction-accent-glow"></div>
@@ -240,6 +271,15 @@
               </div>
               <div class="pill-bar-track"><div id="bar-cvd" class="pill-bar-fill bull" style="width: 72%;"></div></div>
               <span id="badge-cvd" class="ind-badge bull">BUY PRESSURE</span>
+            </div>
+
+            <div class="indicator-pill" id="pill-chainlink">
+              <div class="pill-header">
+                <span class="ind-name">CHAINLINK ORACLE</span>
+                <span id="val-chainlink" class="ind-val">$--,---</span>
+              </div>
+              <div class="pill-bar-track"><div id="bar-chainlink" class="pill-bar-fill bull" style="width: 65%;"></div></div>
+              <span id="badge-chainlink" class="ind-badge bull">ORACLE SYNC</span>
             </div>
           </div>
 

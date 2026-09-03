@@ -186,6 +186,17 @@ export class RoundManager {
     );
     this.currentRound.liveProb = liveProb;
 
+    // High-Conviction Chainlink Oracle Snipe Trigger
+    if (liveProb.chainlinkSnipe && liveProb.chainlinkSnipe.isSnipeActive) {
+      this.currentRound.prediction = liveProb.chainlinkSnipe.snipeDirection;
+      this.currentRound.confidence = liveProb.chainlinkSnipe.snipeConfidence;
+      this.currentRound.grade = 'GRADE A+ (CHAINLINK ORACLE SNIPE)';
+      this.currentRound.gradeColor = 'grade-a-plus';
+      if (!this.currentRound.rationale.some(r => r.includes('CHAINLINK SNIPE'))) {
+        this.currentRound.rationale = [liveProb.chainlinkSnipe.message, ...this.currentRound.rationale.slice(0, 3)];
+      }
+    }
+
     // Check for round settlement at 0 seconds
     if (secondsRemaining === 0 && !this.currentRound.isSettling) {
       this.currentRound.isSettling = true;
