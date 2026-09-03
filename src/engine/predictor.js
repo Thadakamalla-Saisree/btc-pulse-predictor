@@ -107,64 +107,77 @@ export class PredictorEngine {
     let bearScore = 50;
     const rationale = [];
 
-    // Factor 1: 1M Candle Momentum Runs (Heavily weighted for 5-minute round!)
+    // Factor 1: MTF Macro Higher Timeframe Dominance (15M & 5M)
+    const isMacroBull = mtf15mBias === 'BULLISH' && mtf5mBias === 'BULLISH';
+    const isMacroBear = mtf15mBias === 'BEARISH' && mtf5mBias === 'BEARISH';
+
+    if (isTripleBull) {
+      bullScore += 45;
+      rationale.push(`Triple MTF Confluence: 15M, 5M & 1M all Bullish (+45 pts)`);
+    } else if (isTripleBear) {
+      bearScore += 45;
+      rationale.push(`Triple MTF Confluence: 15M, 5M & 1M all Bearish (+45 pts)`);
+    } else if (isMacroBull) {
+      bullScore += 35;
+      rationale.push(`Macro Trend Up: 15M & 5M Bullish Structure (+35 pts)`);
+    } else if (isMacroBear) {
+      bearScore += 35;
+      rationale.push(`Macro Trend Down: 15M & 5M Bearish Structure (+35 pts)`);
+    }
+
+    // Factor 2: 1M Candle Runs within Macro Context
     const recent1m = candles1m.slice(-4);
     const redBars = recent1m.filter(c => c.close < c.open).length;
     const greenBars = recent1m.filter(c => c.close > c.open).length;
 
     if (redBars >= 3 && currentPrice < curEma9_1m) {
-      bearScore += 38;
-      rationale.push(`Active 1M Selloff: ${redBars} of last 4 candles RED below EMA-9`);
+      if (isMacroBull && rsiData1m.rsi <= 40) {
+        bullScore += 25;
+        rationale.push(`Dip Absorption: 1M pullback (${rsiData1m.rsi.toFixed(1)} RSI) into Macro Bullish Support`);
+      } else {
+        bearScore += 25;
+        rationale.push(`Active 1M Selloff: ${redBars} of last 4 candles RED below EMA-9`);
+      }
     } else if (greenBars >= 3 && currentPrice > curEma9_1m) {
-      bullScore += 38;
-      rationale.push(`Active 1M Surge: ${greenBars} of last 4 candles GREEN above EMA-9`);
-    }
-
-    // Factor 2: 1M Tactical Moving Average Slope
-    if (curEma9_1m < curEma21_1m && currentPrice < curEma9_1m) {
-      bearScore += 26;
-      rationale.push(`1M EMA-9 < EMA-21 bearish trend slope ($${curEma9_1m.toFixed(0)})`);
-    } else if (curEma9_1m > curEma21_1m && currentPrice > curEma9_1m) {
-      bullScore += 26;
-      rationale.push(`1M EMA-9 > EMA-21 bullish trend slope ($${curEma9_1m.toFixed(0)})`);
-    }
-
-    // Factor 3: MACD Momentum Direction & Acceleration
-    if (macdData1m.histogram < 0) {
-      bearScore += 20;
-      if (!macdData1m.histogramExpansion) bearScore += 10; // expanding negative
-      rationale.push(`MACD negative momentum (${macdData1m.histogram.toFixed(1)})`);
-    } else if (macdData1m.histogram > 0) {
-      bullScore += 20;
-      if (macdData1m.histogramExpansion) bullScore += 10; // expanding positive
-      rationale.push(`MACD positive momentum (+${macdData1m.histogram.toFixed(1)})`);
-    }
-
-    // Factor 4: Price to Beat (Strike Price) Reality Distance
-    if (lockPrice && lockPrice > 0) {
-      const strikeDelta = currentPrice - lockPrice;
-      if (strikeDelta <= -12) {
-        bearScore += 45;
-        rationale.unshift(`Below Price to Beat by -$${Math.abs(strikeDelta).toFixed(1)} ($${lockPrice.toFixed(0)})`);
-      } else if (strikeDelta >= 12) {
-        bullScore += 45;
-        rationale.unshift(`Above Price to Beat by +$${strikeDelta.toFixed(1)} ($${lockPrice.toFixed(0)})`);
+      if (isMacroBear && rsiData1m.rsi >= 62) {
+        bearScore += 25;
+        rationale.push(`Exhaustion into Resistance: 1M surge (${rsiData1m.rsi.toFixed(1)} RSI) into Macro Bearish Trend`);
+      } else {
+        bullScore += 25;
+        rationale.push(`Active 1M Surge: ${greenBars} of last 4 candles GREEN above EMA-9`);
       }
     }
 
-    // Factor 5: MTF Higher Timeframe Alignment
-    if (isTripleBull) {
-      bullScore += 25;
-      rationale.push(`Triple MTF Alignment: 15M, 5M & 1M all Bullish`);
-    } else if (isTripleBear) {
-      bearScore += 25;
-      rationale.push(`Triple MTF Alignment: 15M, 5M & 1M all Bearish`);
-    } else if (mtf15mBias === 'BEARISH' && mtf5mBias === 'BEARISH') {
-      bearScore += 16;
-      rationale.push(`Higher timeframe resistance on 15M & 5M`);
-    } else if (mtf15mBias === 'BULLISH' && mtf5mBias === 'BULLISH') {
-      bullScore += 16;
-      rationale.push(`Higher timeframe support on 15M & 5M`);
+    // Factor 3: 1M Tactical Moving Average Slope
+    if (curEma9_1m < curEma21_1m && currentPrice < curEma9_1m) {
+      bearScore += 20;
+      rationale.push(`1M EMA-9 < EMA-21 bearish trend slope ($${curEma9_1m.toFixed(0)})`);
+    } else if (curEma9_1m > curEma21_1m && currentPrice > curEma9_1m) {
+      bullScore += 20;
+      rationale.push(`1M EMA-9 > EMA-21 bullish trend slope ($${curEma9_1m.toFixed(0)})`);
+    }
+
+    // Factor 4: MACD Momentum Direction & Acceleration
+    if (macdData1m.histogram < 0) {
+      bearScore += 18;
+      if (!macdData1m.histogramExpansion) bearScore += 8;
+      rationale.push(`MACD negative momentum (${macdData1m.histogram.toFixed(1)})`);
+    } else if (macdData1m.histogram > 0) {
+      bullScore += 18;
+      if (macdData1m.histogramExpansion) bullScore += 8;
+      rationale.push(`MACD positive momentum (+${macdData1m.histogram.toFixed(1)})`);
+    }
+
+    // Factor 5: Price to Beat (Strike Price) Reality Distance
+    if (lockPrice && lockPrice > 0) {
+      const strikeDelta = currentPrice - lockPrice;
+      if (strikeDelta <= -12) {
+        bearScore += 40;
+        rationale.unshift(`Below Price to Beat by -$${Math.abs(strikeDelta).toFixed(1)} ($${lockPrice.toFixed(0)})`);
+      } else if (strikeDelta >= 12) {
+        bullScore += 40;
+        rationale.unshift(`Above Price to Beat by +$${strikeDelta.toFixed(1)} ($${lockPrice.toFixed(0)})`);
+      }
     }
 
     // Factor 6: Bollinger Band Breakdown vs Breakout
