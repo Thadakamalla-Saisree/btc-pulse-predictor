@@ -146,6 +146,13 @@ export class RoundManager {
 
   updatePrediction(latestPrediction) {
     if (!this.currentRound || !latestPrediction) return;
+
+    // Synchronize directional prediction when institutional high conviction is confirmed
+    if (latestPrediction.recommendation === 'TRADE_UP' || latestPrediction.recommendation === 'TRADE_DOWN') {
+      this.currentRound.prediction = latestPrediction.prediction;
+      this.currentRound.confidence = latestPrediction.confidence;
+    }
+
     this.currentRound.grade = latestPrediction.grade || this.currentRound.grade;
     this.currentRound.gradeColor = latestPrediction.gradeColor || this.currentRound.gradeColor;
     this.currentRound.recommendation = latestPrediction.recommendation || this.currentRound.recommendation;
