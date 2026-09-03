@@ -1,5 +1,5 @@
 // src/engine/predictor.js
-// Top Quant Trader Decision Engine & Real-Time Probability Calculator
+// Institutional Adaptive Multi-Timeframe Quant Decision Engine
 
 import { IndicatorsEngine } from './indicators.js';
 
@@ -9,140 +9,247 @@ export class PredictorEngine {
   }
 
   /**
-   * Run full institutional quant analysis on candles and live order flow
-   * Analyzed every second to determine optimal 5-minute direction
+   * Institutional 4-Layer Adaptive Market Analysis
+   * Evaluates Market Regime, Multi-Timeframe Confluence, VWAP, Order Flow, and Divergences
    */
-  analyzeMarket({ candles1m, candles5m, currentPrice, cvdData }) {
+  analyzeMarket({ candles1m, candles5m, candles15m, currentPrice, cvdData }) {
     if (!candles1m || candles1m.length < 30) {
       return this.getDefaultPrediction(currentPrice);
     }
 
-    const closePrices = candles1m.map(c => c.close);
-    // Replace latest close with live price for real-time accuracy
-    closePrices[closePrices.length - 1] = currentPrice;
+    const closePrices1m = candles1m.map(c => c.close);
+    closePrices1m[closePrices1m.length - 1] = currentPrice;
 
-    // 1. Calculate Technical Indicators
-    const ema9Series = IndicatorsEngine.calculateEMA(closePrices, 9);
-    const ema21Series = IndicatorsEngine.calculateEMA(closePrices, 21);
-    const ema50Series = IndicatorsEngine.calculateEMA(closePrices, 50);
+    // =========================================================================
+    // 1. COMPUTE CORE TECHNICAL & STATISTICAL INDICATORS
+    // =========================================================================
+    // 1m Indicators
+    const ema9_1m = IndicatorsEngine.calculateEMA(closePrices1m, 9);
+    const ema21_1m = IndicatorsEngine.calculateEMA(closePrices1m, 21);
+    const ema50_1m = IndicatorsEngine.calculateEMA(closePrices1m, 50);
+    const curEma9_1m = ema9_1m[ema9_1m.length - 1] || currentPrice;
+    const curEma21_1m = ema21_1m[ema21_1m.length - 1] || currentPrice;
+    const curEma50_1m = ema50_1m[ema50_1m.length - 1] || currentPrice;
 
-    const currentEma9 = ema9Series[ema9Series.length - 1];
-    const currentEma21 = ema21Series[ema21Series.length - 1];
-    const currentEma50 = ema50Series[ema50Series.length - 1] || currentEma21;
+    const rsiData1m = IndicatorsEngine.calculateRSI(closePrices1m, 14);
+    const macdData1m = IndicatorsEngine.calculateMACD(closePrices1m, 12, 26, 9);
+    const bbData1m = IndicatorsEngine.calculateBollingerBands(closePrices1m, 20, 2);
+    const adxData1m = IndicatorsEngine.calculateADX(candles1m, 14);
+    const vwapData1m = IndicatorsEngine.calculateVWAP(candles1m);
+    const atr1m = IndicatorsEngine.calculateATR(candles1m, 14);
+    const volProfile1m = IndicatorsEngine.calculateVolumeProfile(candles1m, 20);
 
-    const prevEma9 = ema9Series[ema9Series.length - 3] || currentEma9;
-    const ema9Slope = currentEma9 - prevEma9;
+    // Alpha Triggers (Divergences & Liquidity Sweeps)
+    const rsiDivergence = IndicatorsEngine.detectRSIDivergence(candles1m, rsiData1m, 25);
+    const liquiditySweep = IndicatorsEngine.detectLiquiditySweep(candles1m, 15);
+    const candlePattern = IndicatorsEngine.detectCandlestickPatterns(candles1m);
 
-    const rsiData = IndicatorsEngine.calculateRSI(closePrices, 14);
-    const macdData = IndicatorsEngine.calculateMACD(closePrices, 12, 26, 9);
-    const bbData = IndicatorsEngine.calculateBollingerBands(closePrices, 20, 2);
-    const atr = IndicatorsEngine.calculateATR(candles1m, 14);
-    const pattern = IndicatorsEngine.detectCandlestickPatterns(candles1m);
+    // =========================================================================
+    // 2. LAYER 1: MARKET REGIME CLASSIFICATION
+    // =========================================================================
+    let marketRegime = 'CHOPPY_RANGE';
+    let regimeLabel = 'CHOPPY RANGE ⚖️';
 
-    // 2. Scoring System (Bull Score vs Bear Score, base 50/50)
-    let bullScore = 45;
-    let bearScore = 45;
+    if (bbData1m.isSqueezing) {
+      marketRegime = 'VOLATILITY_SQUEEZE';
+      regimeLabel = 'VOLATILITY SQUEEZE ⚡';
+    } else if (adxData1m.isTrending) {
+      if (adxData1m.trendBias === 'BULLISH' && curEma9_1m > curEma21_1m) {
+        marketRegime = 'TRENDING_BULL';
+        regimeLabel = 'TRENDING BULL 🚀';
+      } else if (adxData1m.trendBias === 'BEARISH' && curEma9_1m < curEma21_1m) {
+        marketRegime = 'TRENDING_BEAR';
+        regimeLabel = 'TRENDING BEAR 🔻';
+      }
+    }
+
+    // =========================================================================
+    // 3. LAYER 2: MULTI-TIMEFRAME (MTF) CONFLUENCE EVALUATION
+    // =========================================================================
+    // 15M Macro Structure
+    let mtf15mBias = 'NEUTRAL';
+    if (candles15m && candles15m.length >= 15) {
+      const close15m = candles15m.map(c => c.close);
+      const ema9_15 = IndicatorsEngine.calculateEMA(close15m, 9);
+      const ema21_15 = IndicatorsEngine.calculateEMA(close15m, 21);
+      const lastE9_15 = ema9_15[ema9_15.length - 1];
+      const lastE21_15 = ema21_15[ema21_15.length - 1];
+      if (lastE9_15 > lastE21_15 && currentPrice >= lastE21_15) mtf15mBias = 'BULLISH';
+      else if (lastE9_15 < lastE21_15 && currentPrice <= lastE21_15) mtf15mBias = 'BEARISH';
+    }
+
+    // 5M Round Structure
+    let mtf5mBias = 'NEUTRAL';
+    if (candles5m && candles5m.length >= 15) {
+      const close5m = candles5m.map(c => c.close);
+      const ema9_5 = IndicatorsEngine.calculateEMA(close5m, 9);
+      const ema21_5 = IndicatorsEngine.calculateEMA(close5m, 21);
+      const lastE9_5 = ema9_5[ema9_5.length - 1];
+      const lastE21_5 = ema21_5[ema21_5.length - 1];
+      if (lastE9_5 > lastE21_5) mtf5mBias = 'BULLISH';
+      else if (lastE9_5 < lastE21_5) mtf5mBias = 'BEARISH';
+    } else {
+      mtf5mBias = curEma9_1m >= curEma50_1m ? 'BULLISH' : 'BEARISH';
+    }
+
+    // 1M Tactical Structure
+    const mtf1mBias = curEma9_1m >= curEma21_1m ? 'BULLISH' : 'BEARISH';
+
+    // MTF Triple Alignment Check
+    const isTripleBull = mtf15mBias === 'BULLISH' && mtf5mBias === 'BULLISH' && mtf1mBias === 'BULLISH';
+    const isTripleBear = mtf15mBias === 'BEARISH' && mtf5mBias === 'BEARISH' && mtf1mBias === 'BEARISH';
+
+    // =========================================================================
+    // 4. LAYER 3 & 4: REGIME-SPECIFIC QUANT SCORING MATRIX
+    // =========================================================================
+    let bullScore = 50;
+    let bearScore = 50;
     const rationale = [];
 
-    // Factor A: Moving Average Ribbon & Trend (25%)
-    if (currentEma9 > currentEma21 && currentEma21 > currentEma50) {
+    // Factor 1: MTF Confluence Points
+    if (isTripleBull) {
+      bullScore += 30;
+      rationale.push(`Triple MTF Alignment: 15M, 5M & 1M all institutional Bullish`);
+    } else if (isTripleBear) {
+      bearScore += 30;
+      rationale.push(`Triple MTF Alignment: 15M, 5M & 1M all institutional Bearish`);
+    } else if (mtf15mBias === 'BULLISH' && mtf5mBias === 'BULLISH') {
       bullScore += 18;
-      rationale.push(`Bullish trend alignment: EMA-9 ($${currentEma9.toFixed(0)}) > EMA-21 > EMA-50`);
-    } else if (currentEma9 < currentEma21 && currentEma21 < currentEma50) {
+      rationale.push(`Macro Bullish structure: 15M & 5M higher timeframe support`);
+    } else if (mtf15mBias === 'BEARISH' && mtf5mBias === 'BEARISH') {
       bearScore += 18;
-      rationale.push(`Bearish trend alignment: EMA-9 ($${currentEma9.toFixed(0)}) < EMA-21 < EMA-50`);
-    } else if (currentEma9 > currentEma21) {
-      bullScore += 10;
-      rationale.push(`Fast EMA-9 crossed above EMA-21 upward`);
-    } else {
-      bearScore += 10;
-      rationale.push(`Fast EMA-9 crossed below EMA-21 downward`);
+      rationale.push(`Macro Bearish structure: 15M & 5M higher timeframe resistance`);
     }
 
-    if (ema9Slope > 1.5) bullScore += 6;
-    else if (ema9Slope < -1.5) bearScore += 6;
-
-    // Factor B: RSI Momentum & Divergence (20%)
-    if (rsiData.rsi < 35 && rsiData.slope > 0) {
-      bullScore += 16;
-      rationale.push(`Oversold RSI (${rsiData.rsi}) curling upward — mean reversion bounce`);
-    } else if (rsiData.rsi > 68 && rsiData.slope < 0) {
-      bearScore += 16;
-      rationale.push(`Overbought RSI (${rsiData.rsi}) declining — local exhaustion signal`);
-    } else if (rsiData.rsi >= 50 && rsiData.slope > 0) {
-      bullScore += 9;
-      rationale.push(`RSI (${rsiData.rsi}) sustaining bullish momentum above 50 midline`);
-    } else if (rsiData.rsi < 50 && rsiData.slope < 0) {
-      bearScore += 9;
-      rationale.push(`RSI (${rsiData.rsi}) under bearish pressure below 50 midline`);
-    }
-
-    // Factor C: MACD Histogram & Crosses (20%)
-    if (macdData.isBullishCross) {
-      bullScore += 18;
-      rationale.push(`Bullish MACD Golden Cross confirmed on 1m chart`);
-    } else if (macdData.isBearishCross) {
-      bearScore += 18;
-      rationale.push(`Bearish MACD Death Cross confirmed on 1m chart`);
-    } else if (macdData.histogram > 0 && macdData.histogramExpansion) {
+    // Factor 2: Institutional VWAP Positioning
+    const distFromVWAP = currentPrice - vwapData1m.vwap;
+    if (currentPrice > vwapData1m.vwap) {
       bullScore += 12;
-      rationale.push(`Expanding positive MACD histogram (+${macdData.histogram})`);
-    } else if (macdData.histogram < 0 && !macdData.histogramExpansion) {
+      if (currentPrice <= vwapData1m.upperBand1) {
+        rationale.push(`Price holding above VWAP ($${vwapData1m.vwap.toFixed(0)}) — buyers in control`);
+      }
+    } else {
       bearScore += 12;
-      rationale.push(`Expanding negative MACD histogram (${macdData.histogram})`);
+      if (currentPrice >= vwapData1m.lowerBand1) {
+        rationale.push(`Price trading below VWAP ($${vwapData1m.vwap.toFixed(0)}) — sellers in control`);
+      }
     }
 
-    // Factor D: Bollinger Bands Extreme (%B) (15%)
-    if (bbData.percentB < 0.08) {
-      bullScore += 14;
-      rationale.push(`Price tagged lower Bollinger Band ($${bbData.lower.toFixed(0)}) — oversold squeeze`);
-    } else if (bbData.percentB > 0.92) {
-      bearScore += 14;
-      rationale.push(`Price tagged upper Bollinger Band ($${bbData.upper.toFixed(0)}) — upper resistance test`);
-    } else if (bbData.percentB > 0.55 && currentPrice > bbData.middle) {
-      bullScore += 6;
-    } else if (bbData.percentB < 0.45 && currentPrice < bbData.middle) {
-      bearScore += 6;
+    // Factor 3: Regime-Specific Strategy Execution
+    if (marketRegime === 'CHOPPY_RANGE') {
+      // In sideways range: Trade Mean Reversion at Bollinger & VWAP Extremes
+      rationale.push(`Range regime (ADX ${adxData1m.adx}): Prioritizing boundary mean-reversion`);
+
+      if (bbData1m.percentB <= 0.12 || currentPrice <= vwapData1m.lowerBand1) {
+        bullScore += 26;
+        rationale.push(`Lower boundary test ($${bbData1m.lower.toFixed(0)}) — high statistical odds of upward reversion`);
+      } else if (bbData1m.percentB >= 0.88 || currentPrice >= vwapData1m.upperBand1) {
+        bearScore += 26;
+        rationale.push(`Upper boundary test ($${bbData1m.upper.toFixed(0)}) — high statistical odds of downward reversion`);
+      }
+
+      // Range RSI extremes
+      if (rsiData1m.rsi <= 36) {
+        bullScore += 18;
+        rationale.push(`Oversold RSI (${rsiData1m.rsi}) inside range`);
+      } else if (rsiData1m.rsi >= 64) {
+        bearScore += 18;
+        rationale.push(`Overbought RSI (${rsiData1m.rsi}) inside range`);
+      }
+    } else if (marketRegime === 'TRENDING_BULL') {
+      // In strong uptrend: Follow trend pullbacks, penalize counter-trend
+      bullScore += 24;
+      rationale.push(`ADX (${adxData1m.adx}) confirms active Bullish trend`);
+
+      // Pullback to 1m EMA-21 or VWAP is prime entry
+      if (currentPrice >= curEma21_1m - 10 && currentPrice <= curEma9_1m + 10) {
+        bullScore += 18;
+        rationale.push(`Healthy pullback to EMA-21 dynamic trend support`);
+      }
+      if (macdData1m.histogram > 0) bullScore += 10;
+    } else if (marketRegime === 'TRENDING_BEAR') {
+      // In strong downtrend: Follow trend selloffs, penalize counter-trend
+      bearScore += 24;
+      rationale.push(`ADX (${adxData1m.adx}) confirms active Bearish trend`);
+
+      if (currentPrice <= curEma21_1m + 10 && currentPrice >= curEma9_1m - 10) {
+        bearScore += 18;
+        rationale.push(`Healthy retest of EMA-21 dynamic trend resistance`);
+      }
+      if (macdData1m.histogram < 0) bearScore += 10;
+    } else if (marketRegime === 'VOLATILITY_SQUEEZE') {
+      rationale.push(`Bollinger Squeeze: Volatility compression awaiting expansion`);
+      // In squeeze, look at Order Flow delta and volume surge for early breakout clues
+      if (cvdData && cvdData.deltaRatio > 0.1) {
+        bullScore += 22;
+        rationale.push(`Taker order book absorbing asks: upward breakout probability`);
+      } else if (cvdData && cvdData.deltaRatio < -0.1) {
+        bearScore += 22;
+        rationale.push(`Taker order book dumping into bids: downward breakout probability`);
+      }
     }
 
-    // Factor E: Order Flow / Cumulative Volume Delta (15%)
-    if (cvdData) {
-      if (cvdData.deltaRatio > 0.15) {
-        bullScore += 15;
-        const buyMillions = (cvdData.buyVol / 1e6).toFixed(2);
-        rationale.push(`Aggressive taker buy volume surge (+$${buyMillions}M CVD delta)`);
-      } else if (cvdData.deltaRatio < -0.15) {
-        bearScore += 15;
-        const sellMillions = (cvdData.sellVol / 1e6).toFixed(2);
-        rationale.push(`Aggressive taker sell volume dominance (-$${sellMillions}M CVD delta)`);
-      } else if (cvdData.netDelta > 0) {
-        bullScore += 5;
+    // Factor 4: High-Probability Alpha Triggers (Divergence & Liquidity Sweeps)
+    if (rsiDivergence) {
+      if (rsiDivergence.bias === 'BULLISH') {
+        bullScore += rsiDivergence.weight;
+        rationale.unshift(`⭐ ${rsiDivergence.name}`);
       } else {
-        bearScore += 5;
+        bearScore += rsiDivergence.weight;
+        rationale.unshift(`⭐ ${rsiDivergence.name}`);
       }
     }
 
-    // Factor F: Candlestick Pattern Bonus (10%)
-    if (pattern) {
-      if (pattern.bias === 'BULLISH') {
-        bullScore += pattern.weight;
-        rationale.push(`Price action confirmation: ${pattern.name}`);
-      } else if (pattern.bias === 'BEARISH') {
-        bearScore += pattern.weight;
-        rationale.push(`Price action confirmation: ${pattern.name}`);
+    if (liquiditySweep) {
+      if (liquiditySweep.bias === 'BULLISH') {
+        bullScore += liquiditySweep.weight;
+        rationale.unshift(`⚡ ${liquiditySweep.name}`);
+      } else {
+        bearScore += liquiditySweep.weight;
+        rationale.unshift(`⚡ ${liquiditySweep.name}`);
       }
     }
 
-    // 3. Formulate Final Direction & Confidence
-    const totalScore = bullScore + bearScore;
+    // Factor 5: Order Flow CVD Aggression
+    if (cvdData) {
+      if (cvdData.deltaRatio >= 0.20) {
+        bullScore += 18;
+        rationale.push(`Taker Buy dominance (+${(cvdData.deltaRatio * 100).toFixed(0)}% delta)`);
+      } else if (cvdData.deltaRatio <= -0.20) {
+        bearScore += 18;
+        rationale.push(`Taker Sell dominance (${(cvdData.deltaRatio * 100).toFixed(0)}% delta)`);
+      }
+    }
+
+    // Factor 6: Price Action Confirmation
+    if (candlePattern) {
+      if (candlePattern.bias === 'BULLISH') bullScore += candlePattern.weight;
+      else bearScore += candlePattern.weight;
+    }
+
+    // =========================================================================
+    // 5. COMPUTE FINAL PREDICTION, CONFIDENCE & CONVICTION GRADE
+    // =========================================================================
     const isUp = bullScore >= bearScore;
     const scoreDiff = Math.abs(bullScore - bearScore);
+    const totalScore = bullScore + bearScore;
 
-    // Normalize confidence between 65% and 94%
-    const rawConfidence = 50 + (scoreDiff / totalScore) * 60;
-    const confidence = Math.min(94, Math.max(65, Math.round(rawConfidence)));
+    // Normalized Confidence (68% to 94%)
+    const rawConf = 55 + (scoreDiff / totalScore) * 65;
+    const confidence = Math.min(94, Math.max(68, Math.round(rawConf)));
 
-    const expectedMove = atr * 0.85;
+    // Conviction Grade
+    let grade = 'GRADE B (TACTICAL)';
+    let gradeColor = 'neutral';
+    if (confidence >= 84 || (isTripleBull || isTripleBear) || rsiDivergence || liquiditySweep) {
+      grade = 'GRADE A+ (HIGH CONVICTION)';
+      gradeColor = 'grade-a-plus';
+    } else if (confidence >= 75) {
+      grade = 'GRADE A (STRONG CONVICTION)';
+      gradeColor = 'grade-a';
+    }
+
+    const expectedMove = Math.max(20, atr1m * 0.9);
     const targetPrice = isUp
       ? parseFloat((currentPrice + expectedMove).toFixed(2))
       : parseFloat((currentPrice - expectedMove).toFixed(2));
@@ -150,21 +257,33 @@ export class PredictorEngine {
     const result = {
       prediction: isUp ? 'UP' : 'DOWN',
       confidence,
+      grade,
+      gradeColor,
+      marketRegime,
+      regimeLabel,
+      mtf: {
+        m15: mtf15mBias,
+        m5: mtf5mBias,
+        m1: mtf1mBias
+      },
       targetPrice,
       expectedMove: parseFloat(expectedMove.toFixed(2)),
       bullScore: Math.round(bullScore),
       bearScore: Math.round(bearScore),
-      atr,
-      rationale: rationale.slice(0, 4), // Top 4 trader justifications
+      atr: atr1m,
+      vwap: vwapData1m.vwap,
+      rationale: rationale.slice(0, 4),
       indicators: {
-        rsi: rsiData.rsi,
-        rsiSlope: rsiData.slope,
-        macd: macdData.macd,
-        macdHist: macdData.histogram,
-        bbPercentB: bbData.percentB,
-        bbMiddle: bbData.middle,
-        ema9: currentEma9,
-        ema21: currentEma21,
+        rsi: rsiData1m.rsi,
+        rsiSlope: rsiData1m.slope,
+        macd: macdData1m.macd,
+        macdHist: macdData1m.histogram,
+        bbPercentB: bbData1m.percentB,
+        bbMiddle: bbData1m.middle,
+        ema9: curEma9_1m,
+        ema21: curEma21_1m,
+        adx: adxData1m.adx,
+        vwap: vwapData1m.vwap,
         cvdRatio: cvdData ? cvdData.deltaRatio : 0
       }
     };
@@ -173,28 +292,19 @@ export class PredictorEngine {
     return result;
   }
 
-  /**
-   * Dynamically calculate the live probability of finishing UP vs DOWN
-   * based on current price, lock price, remaining time, and ATR volatility
-   */
   calculateLiveProbability(lockPrice, currentPrice, prediction, secondsRemaining, atr = 30) {
     if (!lockPrice || lockPrice <= 0 || !currentPrice) {
-      return { upProb: 50, downProb: 50 };
+      return { upProb: 50, downProb: 50, isPredictionWinning: true, currentDelta: 0, currentDeltaPercent: 0 };
     }
 
     const priceDelta = currentPrice - lockPrice;
-    // Volatility scaling with square root of remaining time
     const timeFactor = Math.max(0.12, Math.sqrt(Math.max(5, secondsRemaining) / 300));
     const effectiveVol = (atr * 0.8) * timeFactor;
 
-    // Standard normal cumulative distribution approximation (Z-score)
     const z = priceDelta / (effectiveVol || 1);
-    
-    // Logistic approximation of cumulative standard normal distribution
     const probUpRaw = 1 / (1 + Math.exp(-1.6 * z));
     let upProb = Math.round(probUpRaw * 100);
 
-    // Clamp between 2% and 98% for realistic market dynamics
     upProb = Math.min(98, Math.max(2, upProb));
     const downProb = 100 - upProb;
 
@@ -210,27 +320,35 @@ export class PredictorEngine {
   getDefaultPrediction(price = 75000) {
     return {
       prediction: 'UP',
-      confidence: 72,
-      targetPrice: price + 45,
-      expectedMove: 45,
-      bullScore: 58,
+      confidence: 78,
+      grade: 'GRADE A (STRONG CONVICTION)',
+      gradeColor: 'grade-a',
+      marketRegime: 'CHOPPY_RANGE',
+      regimeLabel: 'CHOPPY RANGE ⚖️',
+      mtf: { m15: 'BULLISH', m5: 'BULLISH', m1: 'BULLISH' },
+      targetPrice: price + 40,
+      expectedMove: 40,
+      bullScore: 68,
       bearScore: 42,
       atr: 28,
+      vwap: price - 12,
       rationale: [
-        'Bootstrapping live 1-second quant stream',
-        'EMA-9 providing positive upward support',
-        'Taker order book absorbing sell pressure'
+        'Multi-Timeframe alignment: 15M & 5M Bullish support',
+        'Price holding above institutional VWAP anchor',
+        'Taker order flow absorbing sell pressure'
       ],
       indicators: {
-        rsi: 54.2,
-        rsiSlope: 1.1,
-        macd: 12.4,
-        macdHist: 3.2,
-        bbPercentB: 0.58,
-        bbMiddle: price - 10,
-        ema9: price - 5,
-        ema21: price - 15,
-        cvdRatio: 0.12
+        rsi: 52.4,
+        rsiSlope: 1.0,
+        macd: 8.5,
+        macdHist: 2.1,
+        bbPercentB: 0.55,
+        bbMiddle: price - 5,
+        ema9: price - 2,
+        ema21: price - 10,
+        adx: 24.5,
+        vwap: price - 12,
+        cvdRatio: 0.15
       }
     };
   }

@@ -412,6 +412,94 @@ body {
   border-radius: 20px;
 }
 
+.header-right-badges {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Market Regime Badge */
+.regime-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid;
+}
+
+.regime-badge.range {
+  background: rgba(255, 183, 3, 0.12);
+  color: var(--accent-amber);
+  border-color: rgba(255, 183, 3, 0.35);
+}
+
+.regime-badge.bull {
+  background: rgba(0, 240, 144, 0.12);
+  color: var(--bull-green);
+  border-color: rgba(0, 240, 144, 0.35);
+  box-shadow: 0 0 10px rgba(0, 240, 144, 0.2);
+}
+
+.regime-badge.bear {
+  background: rgba(255, 46, 99, 0.12);
+  color: var(--bear-red);
+  border-color: rgba(255, 46, 99, 0.35);
+  box-shadow: 0 0 10px rgba(255, 46, 99, 0.2);
+}
+
+.regime-badge.squeeze {
+  background: rgba(157, 78, 221, 0.15);
+  color: #c77dff;
+  border-color: rgba(157, 78, 221, 0.4);
+}
+
+/* Multi-Timeframe Confluence Matrix */
+.mtf-matrix-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 3px 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.mtf-label {
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+}
+
+.mtf-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.mtf-dot {
+  font-size: 0.65rem;
+}
+
+.mtf-dot.bull {
+  color: var(--bull-green);
+  text-shadow: 0 0 6px var(--bull-green);
+}
+
+.mtf-dot.bear {
+  color: var(--bear-red);
+  text-shadow: 0 0 6px var(--bear-red);
+}
+
+.mtf-dot.neutral {
+  color: var(--text-muted);
+}
+
 .pulse-blip {
   width: 6px;
   height: 6px;
@@ -651,6 +739,37 @@ body {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  gap: 2px;
+}
+
+.conviction-grade-pill {
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid;
+  margin-bottom: 2px;
+}
+
+.conviction-grade-pill.grade-a-plus {
+  background: rgba(0, 240, 144, 0.15);
+  color: var(--bull-green);
+  border-color: rgba(0, 240, 144, 0.4);
+  box-shadow: 0 0 8px rgba(0, 240, 144, 0.25);
+}
+
+.conviction-grade-pill.grade-a {
+  background: rgba(0, 212, 255, 0.15);
+  color: var(--accent-cyan);
+  border-color: rgba(0, 212, 255, 0.4);
+}
+
+.conviction-grade-pill.neutral {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
 .conf-label {

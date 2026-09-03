@@ -12,6 +12,7 @@ class App {
     this.chart = null;
     this.candles1m = [];
     this.candles5m = [];
+    this.candles15m = [];
     this.activeTimeframe = '1m';
     this.prevPrice = 0;
     this.latestAnalysis = null;
@@ -29,9 +30,17 @@ class App {
     this.chart = new ChartComponent('tv-chart-container');
     this.chart.init();
 
-    // 2. Load Historical Candles
+    // 2. Load Multi-Timeframe Historical Candles (1m, 5m, 15m)
     try {
-      this.candles1m = await dataService.fetchHistoricalKlines('1m', 120);
+      const [k1m, k5m, k15m] = await Promise.all([
+        dataService.fetchHistoricalKlines('1m', 120),
+        dataService.fetchHistoricalKlines('5m', 60),
+        dataService.fetchHistoricalKlines('15m', 30)
+      ]);
+      this.candles1m = k1m || [];
+      this.candles5m = k5m || [];
+      this.candles15m = k15m || [];
+
       if (this.candles1m.length > 0) {
         this.chart.setData(this.candles1m);
         const lastCandle = this.candles1m[this.candles1m.length - 1];
@@ -42,12 +51,13 @@ class App {
       console.warn('Initial klines load error:', e);
     }
 
-    // 3. Perform Initial Quant Analysis
+    // 3. Perform Initial Multi-Timeframe Quant Analysis
     const currentPrice = this.prevPrice || 75000;
     const cvdData = dataService.getCumulativeVolumeDelta(60);
     this.latestAnalysis = predictorEngine.analyzeMarket({
       candles1m: this.candles1m,
       candles5m: this.candles5m,
+      candles15m: this.candles15m,
       currentPrice,
       cvdData
     });
@@ -90,8 +100,12 @@ class App {
       soundIconOff: document.getElementById('sound-icon-off'),
       utcClock: document.getElementById('live-utc-clock'),
 
-      // Round Hero
+      // Round Hero & Badges
       roundTitle: document.getElementById('round-title-id'),
+      regimeBadge: document.getElementById('regime-badge'),
+      mtfDot15m: document.getElementById('mtf-dot-15m'),
+      mtfDot5m: document.getElementById('mtf-dot-5m'),
+      mtfDot1m: document.getElementById('mtf-dot-1m'),
       radialProgress: document.getElementById('radial-progress-circle'),
       countdownDigits: document.getElementById('countdown-digits'),
       lockPrice: document.getElementById('round-lock-price'),
@@ -100,6 +114,7 @@ class App {
       predictionBanner: document.getElementById('prediction-banner'),
       predictionIcon: document.getElementById('prediction-icon'),
       predictionDir: document.getElementById('prediction-direction'),
+      predictionGrade: document.getElementById('prediction-grade'),
       predictionConf: document.getElementById('prediction-confidence'),
       targetPrice: document.getElementById('prediction-target-price'),
       predictionStatusTag: document.getElementById('prediction-status-tag'),
@@ -117,6 +132,12 @@ class App {
       badgeMacd: document.getElementById('badge-macd'),
       valEma: document.getElementById('val-ema'),
       badgeEma: document.getElementById('badge-ema'),
+      valAdx: document.getElementById('val-adx'),
+      barAdx: document.getElementById('bar-adx'),
+      badgeAdx: document.getElementById('badge-adx'),
+      valVwap: document.getElementById('val-vwap'),
+      barVwap: document.getElementById('bar-vwap'),
+      badgeVwap: document.getElementById('badge-vwap'),
       valCvd: document.getElementById('val-cvd'),
       barCvd: document.getElementById('bar-cvd'),
       badgeCvd: document.getElementById('badge-cvd'),
@@ -172,6 +193,7 @@ class App {
     this.dom.resetBankrollBtn.addEventListener('click', () => {
       roundManager.resetBankroll();
       this.renderBankroll(roundManager.getStats());
+      this.renderHistory(roundManager.history);
       audioService.playTick();
     });
 
@@ -252,11 +274,43 @@ class App {
       this.latestAnalysis = predictorEngine.analyzeMarket({
         candles1m: this.candles1m,
         candles5m: this.candles5m,
+        candles15m: this.candles15m,
         currentPrice: candle.close,
         cvdData
       });
 
+      roundManager.updatePrediction(this.latestAnalysis);
       this.renderTraderBrain(this.latestAnalysis);
+    });
+
+    // 5-Minute Kline Updates
+    dataService.subscribe('kline5m', (candle) => {
+      if (this.candles5m.length === 0) {
+        this.candles5m.push(candle);
+      } else {
+        const last = this.candles5m[this.candles5m.length - 1];
+        if (last.time === candle.time) {
+          this.candles5m[this.candles5m.length - 1] = candle;
+        } else {
+          this.candles5m.push(candle);
+          if (this.candles5m.length > 80) this.candles5m.shift();
+        }
+      }
+    });
+
+    // 15-Minute Kline Updates
+    dataService.subscribe('kline15m', (candle) => {
+      if (this.candles15m.length === 0) {
+        this.candles15m.push(candle);
+      } else {
+        const last = this.candles15m[this.candles15m.length - 1];
+        if (last.time === candle.time) {
+          this.candles15m[this.candles15m.length - 1] = candle;
+        } else {
+          this.candles15m.push(candle);
+          if (this.candles15m.length > 50) this.candles15m.shift();
+        }
+      }
     });
 
     // 24H Ticker Updates
@@ -318,6 +372,7 @@ class App {
         this.latestAnalysis = predictorEngine.analyzeMarket({
           candles1m: this.candles1m,
           candles5m: this.candles5m,
+          candles15m: this.candles15m,
           currentPrice,
           cvdData
         });

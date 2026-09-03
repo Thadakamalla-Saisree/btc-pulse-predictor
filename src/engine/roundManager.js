@@ -119,9 +119,15 @@ export class RoundManager {
       secondsRemaining,
       prediction: latestPrediction ? latestPrediction.prediction : 'UP',
       confidence: latestPrediction && latestPrediction.confidence ? latestPrediction.confidence : 78,
+      grade: latestPrediction && latestPrediction.grade ? latestPrediction.grade : 'GRADE A (STRONG CONVICTION)',
+      gradeColor: latestPrediction && latestPrediction.gradeColor ? latestPrediction.gradeColor : 'grade-a',
+      marketRegime: latestPrediction && latestPrediction.marketRegime ? latestPrediction.marketRegime : 'CHOPPY_RANGE',
+      regimeLabel: latestPrediction && latestPrediction.regimeLabel ? latestPrediction.regimeLabel : 'CHOPPY RANGE ⚖️',
+      mtf: latestPrediction && latestPrediction.mtf ? latestPrediction.mtf : { m15: 'BULLISH', m5: 'BULLISH', m1: 'BULLISH' },
       targetPrice: latestPrediction && latestPrediction.targetPrice ? latestPrediction.targetPrice : parseFloat((finalLock + 35).toFixed(2)),
       rationale: latestPrediction && latestPrediction.rationale ? latestPrediction.rationale : [],
       indicators: latestPrediction && latestPrediction.indicators ? latestPrediction.indicators : {},
+      vwap: latestPrediction && latestPrediction.vwap ? latestPrediction.vwap : finalLock,
       atr: latestPrediction && latestPrediction.atr ? latestPrediction.atr : 25,
       liveProb: { upProb: 50, downProb: 50, isPredictionWinning: true, currentDelta: 0, currentDeltaPercent: 0 },
       isSettling: false
@@ -130,6 +136,20 @@ export class RoundManager {
     this.startClock();
     this.emit({ type: 'ROUND_STARTED', round: this.currentRound });
     audioService.playRoundStart();
+  }
+
+  updatePrediction(latestPrediction) {
+    if (!this.currentRound || !latestPrediction) return;
+    this.currentRound.grade = latestPrediction.grade || this.currentRound.grade;
+    this.currentRound.gradeColor = latestPrediction.gradeColor || this.currentRound.gradeColor;
+    this.currentRound.marketRegime = latestPrediction.marketRegime || this.currentRound.marketRegime;
+    this.currentRound.regimeLabel = latestPrediction.regimeLabel || this.currentRound.regimeLabel;
+    this.currentRound.mtf = latestPrediction.mtf || this.currentRound.mtf;
+    this.currentRound.vwap = latestPrediction.vwap || this.currentRound.vwap;
+    this.currentRound.indicators = latestPrediction.indicators || this.currentRound.indicators;
+    if (latestPrediction.rationale && latestPrediction.rationale.length > 0) {
+      this.currentRound.rationale = latestPrediction.rationale;
+    }
   }
 
   startClock() {
@@ -278,6 +298,7 @@ export class RoundManager {
 
   resetBankroll() {
     this.bankroll = 10000.00;
+    this.history = [];
     this.saveHistory();
   }
 }

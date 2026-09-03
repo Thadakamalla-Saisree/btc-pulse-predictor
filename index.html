@@ -77,10 +77,19 @@
             <div class="round-id-wrap">
               <span class="round-live-tag">LIVE ROUND</span>
               <h2 id="round-title-id" class="round-id">ROUND #-----</h2>
+              <span id="regime-badge" class="regime-badge range">CHOPPY RANGE ⚖️</span>
             </div>
-            <div class="round-timer-badge">
-              <span class="pulse-blip"></span>
-              <span>5-MIN EXPIRY WINDOW</span>
+            <div class="header-right-badges">
+              <div class="mtf-matrix-badge" id="mtf-matrix-badge">
+                <span class="mtf-label">CONFLUENCE:</span>
+                <span class="mtf-item" id="mtf-15m-wrap">15M <span id="mtf-dot-15m" class="mtf-dot bull">●</span></span>
+                <span class="mtf-item" id="mtf-5m-wrap">5M <span id="mtf-dot-5m" class="mtf-dot bull">●</span></span>
+                <span class="mtf-item" id="mtf-1m-wrap">1M <span id="mtf-dot-1m" class="mtf-dot bull">●</span></span>
+              </div>
+              <div class="round-timer-badge">
+                <span class="pulse-blip"></span>
+                <span>5-MIN EXPIRY WINDOW</span>
+              </div>
             </div>
           </div>
 
@@ -130,11 +139,12 @@
               <div class="banner-top-row">
                 <div class="prediction-direction-tag">
                   <span id="prediction-icon" class="pred-symbol">▲</span>
-                  <span class="pred-label">OFFICIAL PREDICTION:</span>
+                  <span class="pred-label">QUANT PREDICTION:</span>
                   <span id="prediction-direction" class="pred-direction">UP (CALL)</span>
                 </div>
                 <div class="confidence-tag">
-                  <span class="conf-label">CONVICTION</span>
+                  <span id="prediction-grade" class="conviction-grade-pill grade-a-plus">GRADE A+</span>
+                  <span class="conf-label">EDGE PROBABILITY</span>
                   <span id="prediction-confidence" class="conf-value">--%</span>
                 </div>
               </div>
@@ -203,6 +213,24 @@
               </div>
               <div class="pill-bar-track"><div id="bar-ema" class="pill-bar-fill bull" style="width: 80%;"></div></div>
               <span id="badge-ema" class="ind-badge bull">BULL TREND</span>
+            </div>
+
+            <div class="indicator-pill" id="pill-adx">
+              <div class="pill-header">
+                <span class="ind-name">ADX (14) REGIME</span>
+                <span id="val-adx" class="ind-val">24.5</span>
+              </div>
+              <div class="pill-bar-track"><div id="bar-adx" class="pill-bar-fill bull" style="width: 50%;"></div></div>
+              <span id="badge-adx" class="ind-badge bull">TRENDING</span>
+            </div>
+
+            <div class="indicator-pill" id="pill-vwap">
+              <div class="pill-header">
+                <span class="ind-name">INSTITUTIONAL VWAP</span>
+                <span id="val-vwap" class="ind-val">$--,---</span>
+              </div>
+              <div class="pill-bar-track"><div id="bar-vwap" class="pill-bar-fill bull" style="width: 60%;"></div></div>
+              <span id="badge-vwap" class="ind-badge bull">ABOVE VWAP</span>
             </div>
 
             <div class="indicator-pill" id="pill-cvd">

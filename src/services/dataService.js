@@ -8,6 +8,7 @@ export class DataService {
       tick: [],
       kline1m: [],
       kline5m: [],
+      kline15m: [],
       ticker: [],
       status: []
     };
@@ -102,6 +103,7 @@ export class DataService {
       'btcusdt@trade',
       'btcusdt@kline_1m',
       'btcusdt@kline_5m',
+      'btcusdt@kline_15m',
       'btcusdt@ticker'
     ].join('/');
 
@@ -144,6 +146,8 @@ export class DataService {
             this.handleKline(data, '1m');
           } else if (stream === 'btcusdt@kline_5m') {
             this.handleKline(data, '5m');
+          } else if (stream === 'btcusdt@kline_15m') {
+            this.handleKline(data, '15m');
           } else if (stream === 'btcusdt@ticker') {
             this.handleTicker(data);
           }
@@ -211,6 +215,8 @@ export class DataService {
       this.emit('kline1m', candle);
     } else if (interval === '5m') {
       this.emit('kline5m', candle);
+    } else if (interval === '15m') {
+      this.emit('kline15m', candle);
     }
   }
 
