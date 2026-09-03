@@ -118,6 +118,8 @@ export class RoundManager {
       currentPrice: finalCurrent,
       secondsRemaining,
       prediction: latestPrediction ? latestPrediction.prediction : 'UP',
+      lockedPrediction: latestPrediction ? latestPrediction.prediction : 'UP',
+      isPredictionLocked: true,
       confidence: latestPrediction && latestPrediction.confidence ? latestPrediction.confidence : 78,
       grade: latestPrediction && latestPrediction.grade ? latestPrediction.grade : 'GRADE A (STRONG CONVICTION)',
       gradeColor: latestPrediction && latestPrediction.gradeColor ? latestPrediction.gradeColor : 'grade-a',
@@ -176,7 +178,7 @@ export class RoundManager {
       audioService.playCountdownWarning();
     }
 
-    // Dynamic Live Probability calculation
+    // Dynamic Live In-The-Money Probability calculation based on LOCKED prediction
     const liveProb = predictorEngine.calculateLiveProbability(
       this.currentRound.lockPrice,
       this.currentRound.currentPrice,
@@ -184,36 +186,17 @@ export class RoundManager {
       secondsRemaining,
       this.currentRound.atr
     );
+
+    // Calculate real-time strike delta against locked call
+    const strikeDelta = this.currentRound.currentPrice - this.currentRound.lockPrice;
+    const isWinning = this.currentRound.prediction === 'UP' ? strikeDelta >= 0 : strikeDelta < 0;
+    liveProb.isPredictionWinning = isWinning;
+    liveProb.currentDelta = parseFloat(strikeDelta.toFixed(2));
+    liveProb.currentDeltaPercent = this.currentRound.lockPrice > 0 ? parseFloat(((strikeDelta / this.currentRound.lockPrice) * 100).toFixed(3)) : 0;
     this.currentRound.liveProb = liveProb;
 
-    // Dynamic Directional Alignment with Price to Beat (Lock Price)
-    const strikeDelta = this.currentRound.currentPrice - this.currentRound.lockPrice;
-    if (Math.abs(strikeDelta) >= 15) {
-      const liveDominantDir = strikeDelta > 0 ? 'UP' : 'DOWN';
-      if (this.currentRound.prediction !== liveDominantDir) {
-        this.currentRound.prediction = liveDominantDir;
-        this.currentRound.confidence = Math.min(94, 75 + Math.floor(Math.abs(strikeDelta) / 4));
-        this.currentRound.grade = 'GRADE A (DIRECTIONAL MOMENTUM)';
-        this.currentRound.gradeColor = 'grade-a';
-        this.currentRound.rationale = [
-          liveDominantDir === 'DOWN'
-            ? `Price broke -$${Math.abs(strikeDelta).toFixed(1)} below Price to Beat ($${this.currentRound.lockPrice}). Downward momentum dominant.`
-            : `Price broke +$${strikeDelta.toFixed(1)} above Price to Beat ($${this.currentRound.lockPrice}). Upward momentum dominant.`,
-          ...this.currentRound.rationale.filter(r => !r.includes('Price broke')).slice(0, 2)
-        ];
-      }
-    }
-
-    // High-Conviction Chainlink Oracle Snipe Trigger
-    if (liveProb.chainlinkSnipe && liveProb.chainlinkSnipe.isSnipeActive) {
-      this.currentRound.prediction = liveProb.chainlinkSnipe.snipeDirection;
-      this.currentRound.confidence = liveProb.chainlinkSnipe.snipeConfidence;
-      this.currentRound.grade = 'GRADE A+ (CHAINLINK ORACLE SNIPE)';
-      this.currentRound.gradeColor = 'grade-a-plus';
-      if (!this.currentRound.rationale.some(r => r.includes('CHAINLINK SNIPE'))) {
-        this.currentRound.rationale = [liveProb.chainlinkSnipe.message, ...this.currentRound.rationale.slice(0, 3)];
-      }
-    }
+    // PREDICTION REMAINS FIRMLY LOCKED: It does NOT flip mid-round!
+    // The trader receives a definitive call at round start and holds for the full 5m window.
 
     // Check for round settlement at 0 seconds
     if (secondsRemaining === 0 && !this.currentRound.isSettling) {

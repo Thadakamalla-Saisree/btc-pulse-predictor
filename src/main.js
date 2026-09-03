@@ -3,6 +3,7 @@
 
 import { dataService } from './services/dataService.js';
 import { chainlinkService } from './services/chainlinkService.js';
+import { polymarketService } from './services/polymarketService.js';
 import { predictorEngine } from './engine/predictor.js';
 import { roundManager } from './engine/roundManager.js';
 import { audioService } from './services/audioService.js';
@@ -86,7 +87,11 @@ class App {
     chainlinkService.start(() => this.prevPrice || 75000);
     chainlinkService.subscribe((data) => this.renderChainlinkOracle(data));
 
-    // 9. Initial History & Bankroll Render
+    // 9. Initialize Polymarket Real-Time Service
+    polymarketService.subscribe((market) => this.renderPolymarketLive(market));
+    polymarketService.start();
+
+    // 10. Initial History & Bankroll Render
     this.renderHistory(roundManager.history);
     this.renderBankroll(roundManager.getStats());
   }
@@ -94,6 +99,7 @@ class App {
   cacheDom() {
     this.dom = {
       livePrice: document.getElementById('live-btc-price'),
+      liveFeedLabel: document.getElementById('live-feed-label'),
       priceChange: document.getElementById('live-price-change'),
       high24h: document.getElementById('ticker-24h-high'),
       low24h: document.getElementById('ticker-24h-low'),
@@ -104,6 +110,17 @@ class App {
       soundIconOn: document.getElementById('sound-icon-on'),
       soundIconOff: document.getElementById('sound-icon-off'),
       utcClock: document.getElementById('live-utc-clock'),
+      feedBtnPoly: document.getElementById('feed-btn-poly'),
+      feedBtnBnc: document.getElementById('feed-btn-bnc'),
+
+      // Polymarket Widget
+      polyEventTitle: document.getElementById('poly-event-title'),
+      polyUpPrice: document.getElementById('poly-up-price'),
+      polyUpPct: document.getElementById('poly-up-pct'),
+      polyDownPrice: document.getElementById('poly-down-price'),
+      polyDownPct: document.getElementById('poly-down-pct'),
+      polyExternalLink: document.getElementById('poly-external-link'),
+      polyLastSync: document.getElementById('poly-last-sync'),
 
       // Round Hero & Badges
       roundTitle: document.getElementById('round-title-id'),
@@ -246,6 +263,19 @@ class App {
       });
     }
 
+    // Feed Source Selector (Polymarket BTC-USD vs Binance USDT)
+    if (this.dom.feedBtnPoly) {
+      this.dom.feedBtnPoly.addEventListener('click', () => {
+        this.switchFeed('POLYMARKET_USD');
+      });
+    }
+
+    if (this.dom.feedBtnBnc) {
+      this.dom.feedBtnBnc.addEventListener('click', () => {
+        this.switchFeed('BINANCE_USDT');
+      });
+    }
+
     // Timeframe selector
     this.dom.tfBtns.forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -259,6 +289,54 @@ class App {
         }
       });
     });
+  }
+
+  async switchFeed(source) {
+    if (dataService.feedSource === source) return;
+    dataService.setFeedSource(source);
+
+    const isPoly = source === 'POLYMARKET_USD';
+    if (this.dom.feedBtnPoly) this.dom.feedBtnPoly.classList.toggle('active', isPoly);
+    if (this.dom.feedBtnBnc) this.dom.feedBtnBnc.classList.toggle('active', !isPoly);
+    if (this.dom.liveFeedLabel) {
+      this.dom.liveFeedLabel.textContent = isPoly ? 'BTC / USD (POLYMARKET)' : 'BTC / USDT (BINANCE)';
+    }
+
+    // Refresh candles
+    try {
+      const [k1m, k5m, k15m] = await Promise.all([
+        dataService.fetchHistoricalKlines('1m', 120),
+        dataService.fetchHistoricalKlines('5m', 60),
+        dataService.fetchHistoricalKlines('15m', 30)
+      ]);
+      this.candles1m = k1m || [];
+      this.candles5m = k5m || [];
+      this.candles15m = k15m || [];
+      if (this.candles1m.length > 0) {
+        this.chart.setData(this.candles1m);
+        const last = this.candles1m[this.candles1m.length - 1];
+        this.prevPrice = last.close;
+        this.updateLivePriceDisplay(last.close);
+      }
+      audioService.playTick();
+    } catch (e) {
+      console.error('Error refreshing candles on feed switch:', e);
+    }
+  }
+
+  renderPolymarketLive(market) {
+    if (!market) return;
+    if (this.dom.polyEventTitle) this.dom.polyEventTitle.textContent = market.title;
+    if (this.dom.polyUpPrice) this.dom.polyUpPrice.textContent = `${market.upPrice}¢`;
+    if (this.dom.polyUpPct) this.dom.polyUpPct.textContent = `(${market.upOdds}%)`;
+    if (this.dom.polyDownPrice) this.dom.polyDownPrice.textContent = `${market.downPrice}¢`;
+    if (this.dom.polyDownPct) this.dom.polyDownPct.textContent = `(${market.downOdds}%)`;
+    if (this.dom.polyExternalLink && market.polymarketUrl) {
+      this.dom.polyExternalLink.href = market.polymarketUrl;
+    }
+    if (this.dom.polyLastSync) {
+      this.dom.polyLastSync.textContent = `Synced at ${market.lastUpdated}`;
+    }
   }
 
   updateAudioButtonState() {
@@ -491,38 +569,32 @@ class App {
     this.dom.roundDelta.textContent = `${isPositive ? '+' : ''}$${delta.toFixed(2)} (${isPositive ? '+' : ''}${deltaPercent.toFixed(3)}%)`;
     this.dom.roundDelta.className = `delta-badge ${isPositive ? 'positive' : 'negative'}`;
 
-    // 3. Prediction status (Winning vs Losing)
+    // 3. Prediction status (Winning vs Losing) against LOCKED prediction
     const isWinning = round.liveProb.isPredictionWinning;
     this.dom.predictionStatusTag.className = `prediction-status-pill ${isWinning ? 'winning' : 'losing'}`;
-    this.dom.predictionStatusText.textContent = isWinning ? 'ON TRACK' : 'TESTING BOUNDS';
+    this.dom.predictionStatusText.textContent = isWinning ? 'ON TRACK (WINNING)' : 'AT RISK (BELOW STRIKE)';
 
-    // Synchronize Banner with active Round Prediction
+    // Synchronize Banner with LOCKED Round Prediction (Firm signal that does not flip)
     const isPredUp = round.prediction === 'UP';
     this.dom.predictionDir.textContent = isPredUp ? 'UP (CALL)' : 'DOWN (PUT)';
     this.dom.predictionIcon.textContent = isPredUp ? '▲' : '▼';
     this.dom.predictionBanner.className = `prediction-banner ${isPredUp ? 'banner-up' : 'banner-down'}`;
     this.dom.predictionGrade.textContent = round.grade || 'GRADE A (CONVICTION)';
     this.dom.predictionGrade.className = `conviction-grade-pill ${round.gradeColor || 'grade-a'}`;
-    this.dom.predictionConf.textContent = `${round.confidence || 75}%`;
+    this.dom.predictionConf.textContent = `${round.confidence || 78}%`;
 
     // 4. Probability Meter
     this.dom.probUpText.textContent = `${round.liveProb.upProb}%`;
     this.dom.probDownText.textContent = `${round.liveProb.downProb}%`;
     this.dom.probBarFill.style.width = `${round.liveProb.upProb}%`;
 
-    // 5. Chainlink Oracle Snipe Integration
+    // 5. Chainlink Oracle Snipe Integration (Informational badge only - does NOT overwrite locked prediction)
     if (round.liveProb && round.liveProb.chainlinkSnipe && this.dom.clSnipeBadge) {
       const snipe = round.liveProb.chainlinkSnipe;
       if (snipe.isSnipeActive) {
         const isUp = snipe.snipeDirection === 'UP';
         this.dom.clSnipeBadge.className = isUp ? 'snipe-badge active' : 'snipe-badge active-bear';
-        this.dom.clSnipeStatus.textContent = `🔥 ACTIVE: ${snipe.snipeDirection} (${snipe.snipeConfidence}%)`;
-        this.dom.predictionGrade.textContent = 'GRADE A+ (CHAINLINK SNIPE)';
-        this.dom.predictionGrade.className = 'conviction-grade-pill grade-a-plus';
-        this.dom.predictionConf.textContent = `${snipe.snipeConfidence}%`;
-        this.dom.predictionDir.textContent = isUp ? 'UP (CALL)' : 'DOWN (PUT)';
-        this.dom.predictionIcon.textContent = isUp ? '▲' : '▼';
-        this.dom.predictionBanner.className = `prediction-banner ${isUp ? 'banner-up' : 'banner-down'}`;
+        this.dom.clSnipeStatus.textContent = `🔥 T-60s ORACLE LEAN: ${snipe.snipeDirection} (${snipe.snipeConfidence}%)`;
       } else if (round.secondsRemaining <= 65) {
         this.dom.clSnipeBadge.className = 'snipe-badge waiting';
         this.dom.clSnipeStatus.textContent = `EVALUATING (T-${round.secondsRemaining}s)`;

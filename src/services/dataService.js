@@ -4,13 +4,15 @@
 export class DataService {
   constructor() {
     this.ws = null;
+    this.feedSource = 'POLYMARKET_USD'; // 'POLYMARKET_USD' (Coinbase/Chainlink benchmark) or 'BINANCE_USDT'
     this.subscribers = {
       tick: [],
       kline1m: [],
       kline5m: [],
       kline15m: [],
       ticker: [],
-      status: []
+      status: [],
+      feed_changed: []
     };
     this.recentTrades = []; // Circular buffer of last 500 trades for CVD
     this.currentPrice = 0;
@@ -19,6 +21,17 @@ export class DataService {
     this.latencyMs = 0;
     this.reconnectAttempts = 0;
     this.maxTradesBuffer = 1000;
+  }
+
+  setFeedSource(source) {
+    if (this.feedSource === source) return;
+    this.feedSource = source;
+    console.log(`⚡ Switched feed source to: ${source}`);
+    if (this.ws) {
+      try { this.ws.close(); } catch (e) {}
+    }
+    this.connectWebSocket();
+    this.emit('feed_changed', { source });
   }
 
   subscribe(event, callback) {
@@ -42,8 +55,33 @@ export class DataService {
     }
   }
 
-  // Fetch initial 1m and 5m candle history from Binance REST API
+  // Fetch initial 1m, 5m, and 15m candle history
   async fetchHistoricalKlines(interval = '1m', limit = 120) {
+    if (this.feedSource === 'POLYMARKET_USD') {
+      const granularityMap = { '1m': 60, '5m': 300, '15m': 900 };
+      const gran = granularityMap[interval] || 60;
+      try {
+        const response = await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data) && data.length > 0) {
+            return data.slice(0, limit).map(item => ({
+              time: item[0],
+              low: item[1],
+              high: item[2],
+              open: item[3],
+              close: item[4],
+              volume: item[5],
+              isClosed: true
+            })).reverse();
+          }
+        }
+      } catch (e) {
+        console.warn('Coinbase candles fetch error, falling back to Binance:', e.message);
+      }
+    }
+
+    // Binance fallback / Binance mode
     const urls = [
       `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=${limit}`,
       `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=${limit}`
@@ -75,7 +113,7 @@ export class DataService {
   generateSyntheticKlines(count, stepSec = 60) {
     const nowSec = Math.floor(Date.now() / 1000);
     const candles = [];
-    let price = 75000 + Math.random() * 200 - 100;
+    let price = 78500 + Math.random() * 200 - 100;
 
     for (let i = count; i >= 0; i--) {
       const time = nowSec - i * stepSec;
@@ -91,7 +129,6 @@ export class DataService {
     return candles;
   }
 
-  // Connect to Binance Combined WebSocket Stream
   connectWebSocket() {
     if (this.ws) {
       try {
@@ -99,6 +136,102 @@ export class DataService {
       } catch (e) {}
     }
 
+    if (this.feedSource === 'POLYMARKET_USD') {
+      this.connectCoinbaseWs();
+    } else {
+      this.connectBinanceWs();
+    }
+  }
+
+  connectCoinbaseWs() {
+    this.emit('status', { status: 'CONNECTING (POLYMARKET BTC/USD)', latency: 0 });
+
+    try {
+      this.ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
+      let lastPingTime = Date.now();
+
+      this.ws.onopen = () => {
+        this.isConnected = true;
+        this.reconnectAttempts = 0;
+        this.latencyMs = Math.max(12, Math.floor(Date.now() - lastPingTime));
+        this.emit('status', { status: 'CONNECTED (POLYMARKET BTC/USD)', latency: this.latencyMs });
+        console.log('⚡ Connected to Coinbase Live BTC-USD Stream for Polymarket');
+
+        this.ws.send(JSON.stringify({
+          type: 'subscribe',
+          product_ids: ['BTC-USD'],
+          channels: ['ticker']
+        }));
+
+        clearInterval(this.pingInterval);
+        this.pingInterval = setInterval(() => {
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.latencyMs = Math.floor(15 + Math.random() * 12);
+            this.emit('status', { status: 'CONNECTED (POLYMARKET BTC/USD)', latency: this.latencyMs });
+          }
+        }, 8000);
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'ticker' && msg.price) {
+            const price = parseFloat(msg.price);
+            const quantity = parseFloat(msg.last_size || 0.05);
+            const isBuyerMaker = msg.side === 'sell';
+
+            this.handleTrade({
+              p: price,
+              q: quantity,
+              T: Date.now(),
+              m: isBuyerMaker
+            });
+
+            // Emit live 1m kline tick
+            const candle = {
+              time: Math.floor(Date.now() / 1000 / 60) * 60,
+              open: price,
+              high: price,
+              low: price,
+              close: price,
+              volume: quantity,
+              isClosed: false
+            };
+            this.emit('kline1m', candle);
+
+            this.emit('ticker', {
+              price,
+              changePercent: parseFloat(msg.price_percent_chg_24h || 0),
+              high24h: parseFloat(msg.high_24h || price),
+              low24h: parseFloat(msg.low_24h || price),
+              volume24h: parseFloat(msg.volume_24h || 0),
+              quoteVolume24h: parseFloat(msg.volume_30d || 0)
+            });
+          }
+        } catch (e) {
+          console.error('Error parsing Coinbase WS message:', e);
+        }
+      };
+
+      this.ws.onerror = (err) => {
+        console.warn('Coinbase WS error, falling back to Binance:', err);
+        this.connectBinanceWs();
+      };
+
+      this.ws.onclose = () => {
+        this.isConnected = false;
+        clearInterval(this.pingInterval);
+        this.emit('status', { status: 'DISCONNECTED', latency: 0 });
+        const timeout = Math.min(10000, 1500 * Math.pow(1.5, this.reconnectAttempts++));
+        setTimeout(() => this.connectWebSocket(), timeout);
+      };
+    } catch (e) {
+      console.warn('Coinbase WS init exception, using Binance:', e);
+      this.connectBinanceWs();
+    }
+  }
+
+  connectBinanceWs() {
     const streams = [
       'btcusdt@trade',
       'btcusdt@kline_1m',
@@ -109,27 +242,24 @@ export class DataService {
 
     const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
 
-    this.emit('status', { status: 'CONNECTING', latency: 0 });
+    this.emit('status', { status: 'CONNECTING (BINANCE USDT)', latency: 0 });
 
     try {
       this.ws = new WebSocket(wsUrl);
-
       let lastPingTime = Date.now();
 
       this.ws.onopen = () => {
         this.isConnected = true;
         this.reconnectAttempts = 0;
         this.latencyMs = Math.max(12, Math.floor(Date.now() - lastPingTime));
-        this.emit('status', { status: 'CONNECTED', latency: this.latencyMs });
+        this.emit('status', { status: 'CONNECTED (BINANCE USDT)', latency: this.latencyMs });
         console.log('⚡ Connected to Binance Live Crypto Stream');
 
-        // Measure live roundtrip ping every 10s
         clearInterval(this.pingInterval);
         this.pingInterval = setInterval(() => {
           if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            lastPingTime = Date.now();
             this.latencyMs = Math.floor(15 + Math.random() * 15);
-            this.emit('status', { status: 'CONNECTED', latency: this.latencyMs });
+            this.emit('status', { status: 'CONNECTED (BINANCE USDT)', latency: this.latencyMs });
           }
         }, 8000);
       };
@@ -157,7 +287,7 @@ export class DataService {
       };
 
       this.ws.onerror = (err) => {
-        console.warn('WebSocket error, falling back to simulated heartbeat:', err);
+        console.warn('Binance WebSocket error:', err);
       };
 
       this.ws.onclose = () => {
@@ -165,12 +295,11 @@ export class DataService {
         clearInterval(this.pingInterval);
         this.emit('status', { status: 'DISCONNECTED', latency: 0 });
 
-        // Auto reconnect with exponential backoff
         const timeout = Math.min(10000, 1500 * Math.pow(1.5, this.reconnectAttempts++));
         setTimeout(() => this.connectWebSocket(), timeout);
       };
     } catch (e) {
-      console.warn('WebSocket init exception:', e);
+      console.warn('Binance WebSocket init exception:', e);
       this.startFallbackHeartbeat();
     }
   }

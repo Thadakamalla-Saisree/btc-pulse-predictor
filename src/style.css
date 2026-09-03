@@ -1748,6 +1748,221 @@ body {
 }
 
 /* ==========================================================================
+   FEED TOGGLE GROUP (POLYMARKET vs BINANCE)
+   ========================================================================== */
+.feed-toggle-group {
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+
+.feed-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.feed-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.feed-btn.active {
+  background: rgba(0, 212, 255, 0.15);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+}
+
+.feed-btn-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ==========================================================================
+   POLYMARKET LIVE BENCHMARK BAR
+   ========================================================================== */
+.polymarket-live-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: linear-gradient(90deg, rgba(16, 24, 48, 0.85) 0%, rgba(20, 16, 40, 0.85) 100%);
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  border-radius: var(--radius-md);
+  padding: 12px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+.poly-info-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.poly-badge-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--accent-cyan);
+}
+
+.poly-diamond {
+  color: #a855f7;
+}
+
+.poly-live-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bull-green);
+  box-shadow: 0 0 6px var(--bull-green);
+}
+
+.poly-event-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.poly-sub-note {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+.poly-odds-col {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.poly-odd-box {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-subtle);
+  min-width: 120px;
+}
+
+.poly-odd-box.up {
+  border-color: rgba(0, 245, 160, 0.3);
+}
+
+.poly-odd-box.down {
+  border-color: rgba(255, 46, 99, 0.3);
+}
+
+.odd-lbl {
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.poly-odd-box.up .odd-lbl { color: var(--bull-green); }
+.poly-odd-box.down .odd-lbl { color: var(--bear-red); }
+
+.odd-val-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.odd-num {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+.odd-pct {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.poly-action-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.poly-trade-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 10px rgba(168, 85, 247, 0.3);
+}
+
+.poly-trade-btn:hover {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+}
+
+.poly-sync-text {
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   LOCKED PREDICTION HEADER & TAGS
+   ========================================================================== */
+.pred-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lock-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--accent-cyan);
+  text-transform: uppercase;
+}
+
+.lock-note {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  font-weight: 600;
+}
+
+/* ==========================================================================
    RESPONSIVE DESIGN
    ========================================================================== */
 @media (max-width: 1080px) {
