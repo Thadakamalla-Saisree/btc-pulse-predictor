@@ -70,17 +70,16 @@ class App {
     this.setupRoundSubscriptions();
     this.setupDataSubscriptions();
 
-    // 5. Initialize 5-Minute Round Manager
-    // Use the 5m candle open price if available, otherwise currentPrice
-    const candleOpen = this.candles1m.length > 0 ? this.candles1m[this.candles1m.length - 1].open : currentPrice;
-    roundManager.initRound(currentPrice, this.latestAnalysis, candleOpen);
+    // 5. Initialize 5-Minute Round Manager with 60-Second TWAP Strike for Polymarket
+    const twapStrike = this.calculate60sTWAP(this.candles1m, currentPrice);
+    roundManager.initRound(currentPrice, this.latestAnalysis, twapStrike);
 
     // 6. Explicitly render the active round on screen immediately
     if (roundManager.currentRound) {
       this.renderRoundStarted(roundManager.currentRound);
     }
 
-    // 7. Connect Binance Live Streams
+    // 7. Connect Data Stream
     dataService.connectWebSocket();
 
     // 8. Initialize Chainlink Oracle & Snipe Intelligence
@@ -96,10 +95,23 @@ class App {
     this.renderBankroll(roundManager.getStats());
   }
 
+  calculate60sTWAP(candles1m, fallbackPrice) {
+    if (!candles1m || candles1m.length === 0) return fallbackPrice;
+    const prevCandle = candles1m[candles1m.length - 1];
+    if (prevCandle) {
+      // Chainlink 60-Second TWAP formula: (Open + High + Low + 2*Close) / 5
+      const twap = (prevCandle.open + prevCandle.high + prevCandle.low + 2 * prevCandle.close) / 5;
+      return parseFloat(twap.toFixed(2));
+    }
+    return fallbackPrice;
+  }
+
   cacheDom() {
     this.dom = {
       livePrice: document.getElementById('live-btc-price'),
       liveFeedLabel: document.getElementById('live-feed-label'),
+      chartHeaderTitle: document.getElementById('chart-header-title'),
+      chartHeaderSubtitle: document.getElementById('chart-header-subtitle'),
       priceChange: document.getElementById('live-price-change'),
       high24h: document.getElementById('ticker-24h-high'),
       low24h: document.getElementById('ticker-24h-low'),
@@ -300,6 +312,16 @@ class App {
     if (this.dom.feedBtnBnc) this.dom.feedBtnBnc.classList.toggle('active', !isPoly);
     if (this.dom.liveFeedLabel) {
       this.dom.liveFeedLabel.textContent = isPoly ? 'BTC / USD (POLYMARKET)' : 'BTC / USDT (BINANCE)';
+    }
+    if (this.dom.chartHeaderTitle) {
+      this.dom.chartHeaderTitle.textContent = isPoly 
+        ? 'BTC/USD REAL-TIME CANDLESTICK CHART (POLYMARKET BENCHMARK)' 
+        : 'BTC/USDT REAL-TIME CANDLESTICK CHART (BINANCE)';
+    }
+    if (this.dom.chartHeaderSubtitle) {
+      this.dom.chartHeaderSubtitle.textContent = isPoly 
+        ? 'Coinbase Spot USD Feed with Polymarket 60s TWAP Strike & Target Overlays' 
+        : 'Direct Binance Tick Feed with Strike & Target Overlays';
     }
 
     // Refresh candles
@@ -517,18 +539,25 @@ class App {
       } else if (event.type === 'ROUND_SETTLED') {
         this.renderRoundSettled(event.result, event.history);
       } else if (event.type === 'REQUEST_NEXT_ROUND') {
-        // Formulate fresh prediction for the new 5m round
+        // Formulate fresh prediction for the new 5m round with exact 60s TWAP Strike
         const currentPrice = event.lastClosePrice || dataService.currentPrice;
         const cvdData = dataService.getCumulativeVolumeDelta(60);
+        const twapStrike = this.calculate60sTWAP(this.candles1m, currentPrice);
+        const polyOdds = (polymarketService.latestMarket && polymarketService.latestMarket.upOdds) ? {
+          upOdds: polymarketService.latestMarket.upOdds,
+          downOdds: polymarketService.latestMarket.downOdds
+        } : null;
+
         this.latestAnalysis = predictorEngine.analyzeMarket({
           candles1m: this.candles1m,
           candles5m: this.candles5m,
           candles15m: this.candles15m,
           currentPrice,
           cvdData,
-          lockPrice: currentPrice
+          lockPrice: twapStrike,
+          polyOdds
         });
-        roundManager.initRound(currentPrice, this.latestAnalysis, currentPrice);
+        roundManager.initRound(currentPrice, this.latestAnalysis, twapStrike);
       }
     });
   }

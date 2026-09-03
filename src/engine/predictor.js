@@ -13,7 +13,7 @@ export class PredictorEngine {
    * Institutional 4-Layer Adaptive Market Analysis
    * Evaluates Market Regime, Multi-Timeframe Confluence, VWAP, Order Flow, and Divergences
    */
-  analyzeMarket({ candles1m, candles5m, candles15m, currentPrice, cvdData, lockPrice }) {
+  analyzeMarket({ candles1m, candles5m, candles15m, currentPrice, cvdData, lockPrice, polyOdds }) {
     if (!candles1m || candles1m.length < 30) {
       return this.getDefaultPrediction(currentPrice);
     }
@@ -171,12 +171,25 @@ export class PredictorEngine {
     // Factor 5: Price to Beat (Strike Price) Reality Distance
     if (lockPrice && lockPrice > 0) {
       const strikeDelta = currentPrice - lockPrice;
-      if (strikeDelta <= -12) {
-        bearScore += 40;
+      if (strikeDelta <= -8) {
+        bearScore += 35;
         rationale.unshift(`Below Price to Beat by -$${Math.abs(strikeDelta).toFixed(1)} ($${lockPrice.toFixed(0)})`);
-      } else if (strikeDelta >= 12) {
-        bullScore += 40;
+      } else if (strikeDelta >= 8) {
+        bullScore += 35;
         rationale.unshift(`Above Price to Beat by +$${strikeDelta.toFixed(1)} ($${lockPrice.toFixed(0)})`);
+      }
+    }
+
+    // Factor 5B: Polymarket Order Book Implied Probability Consensus
+    if (polyOdds && polyOdds.upOdds && polyOdds.downOdds) {
+      if (polyOdds.upOdds >= 53) {
+        const bonus = Math.min(25, Math.round((polyOdds.upOdds - 50) * 1.6));
+        bullScore += bonus;
+        rationale.push(`Polymarket Order Book Leaning UP (${polyOdds.upOdds.toFixed(1)}¢ Yes shares)`);
+      } else if (polyOdds.downOdds >= 53) {
+        const bonus = Math.min(25, Math.round((polyOdds.downOdds - 50) * 1.6));
+        bearScore += bonus;
+        rationale.push(`Polymarket Order Book Leaning DOWN (${polyOdds.downOdds.toFixed(1)}¢ No shares)`);
       }
     }
 
