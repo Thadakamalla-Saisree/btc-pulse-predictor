@@ -146,54 +146,6 @@ export class DataService {
   connectCoinbaseWs() {
     this.emit('status', { status: 'CONNECTING (POLYMARKET BTC/USD)', latency: 0 });
 
-    // 1. Continuous reliable REST polling backup (guarantees exact USD price even if WebSocket blips)
-    if (!this.coinbasePollInterval) {
-      this.coinbasePollInterval = setInterval(async () => {
-        if (this.feedSource !== 'POLYMARKET_USD') return;
-        try {
-          const res = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot');
-          if (res.ok) {
-            const json = await res.json();
-            if (json && json.data && json.data.amount) {
-              const price = parseFloat(json.data.amount);
-              this.currentPrice = price;
-
-              this.handleTrade({
-                p: price,
-                q: 0.1,
-                T: Date.now(),
-                m: false
-              });
-
-              // Keep 1m candle updated
-              const candle = {
-                time: Math.floor(Date.now() / 1000 / 60) * 60,
-                open: price,
-                high: price,
-                low: price,
-                close: price,
-                volume: 0.1,
-                isClosed: false
-              };
-              this.emit('kline1m', candle);
-
-              this.emit('ticker', {
-                price,
-                changePercent: 0,
-                high24h: price + 150,
-                low24h: price - 150,
-                volume24h: 5000,
-                quoteVolume24h: 0
-              });
-            }
-          }
-        } catch (err) {
-          // Silent catch
-        }
-      }, 1000);
-    }
-
-    // 2. High-speed WebSocket connection for sub-100ms ticks
     try {
       this.ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
       let lastPingTime = Date.now();
@@ -201,6 +153,7 @@ export class DataService {
       this.ws.onopen = () => {
         this.isConnected = true;
         this.reconnectAttempts = 0;
+        this.stopCoinbasePoll(); // Stop REST poller when WebSocket is live!
         this.latencyMs = Math.max(12, Math.floor(Date.now() - lastPingTime));
         this.emit('status', { status: 'CONNECTED (POLYMARKET BTC/USD)', latency: this.latencyMs });
         console.log('⚡ Connected to Coinbase Live BTC-USD Stream for Polymarket');
@@ -227,34 +180,56 @@ export class DataService {
             const price = parseFloat(msg.price);
             const quantity = parseFloat(msg.last_size || 0.05);
             const isBuyerMaker = msg.side === 'sell';
+            const now = Date.now();
 
             this.handleTrade({
               p: price,
               q: quantity,
-              T: Date.now(),
+              T: now,
               m: isBuyerMaker
             });
 
-            // Emit live 1m kline tick
-            const candle = {
-              time: Math.floor(Date.now() / 1000 / 60) * 60,
-              open: price,
-              high: price,
-              low: price,
-              close: price,
-              volume: quantity,
-              isClosed: false
-            };
-            this.emit('kline1m', candle);
+            // True 1m candle tracking without destroying open/high/low
+            const minSec = Math.floor(now / 60000) * 60;
+            if (!this.activeCoinbase1mCandle || this.activeCoinbase1mCandle.time !== minSec) {
+              if (this.activeCoinbase1mCandle) {
+                this.activeCoinbase1mCandle.isClosed = true;
+                this.emit('kline1m', { ...this.activeCoinbase1mCandle });
+              }
+              this.activeCoinbase1mCandle = {
+                time: minSec,
+                open: price,
+                high: price,
+                low: price,
+                close: price,
+                volume: quantity,
+                isClosed: false
+              };
+            } else {
+              this.activeCoinbase1mCandle.close = price;
+              this.activeCoinbase1mCandle.high = Math.max(this.activeCoinbase1mCandle.high, price);
+              this.activeCoinbase1mCandle.low = Math.min(this.activeCoinbase1mCandle.low, price);
+              this.activeCoinbase1mCandle.volume += quantity;
+            }
 
-            this.emit('ticker', {
-              price,
-              changePercent: parseFloat(msg.price_percent_chg_24h || 0),
-              high24h: parseFloat(msg.high_24h || price),
-              low24h: parseFloat(msg.low_24h || price),
-              volume24h: parseFloat(msg.volume_24h || 0),
-              quoteVolume24h: parseFloat(msg.volume_30d || 0)
-            });
+            // Emit 1m kline updates throttled every 2 seconds to prevent UI churn
+            if (!this.last1mEmitTime || now - this.last1mEmitTime >= 2000) {
+              this.last1mEmitTime = now;
+              this.emit('kline1m', { ...this.activeCoinbase1mCandle });
+            }
+
+            // Emit 24h ticker throttled every 2 seconds
+            if (!this.lastTickerEmitTime || now - this.lastTickerEmitTime >= 2000) {
+              this.lastTickerEmitTime = now;
+              this.emit('ticker', {
+                price,
+                changePercent: parseFloat(msg.price_percent_chg_24h || 0),
+                high24h: parseFloat(msg.high_24h || price),
+                low24h: parseFloat(msg.low_24h || price),
+                volume24h: parseFloat(msg.volume_24h || 0),
+                quoteVolume24h: parseFloat(msg.volume_30d || 0)
+              });
+            }
           }
         } catch (e) {
           console.error('Error parsing Coinbase WS message:', e);
@@ -262,13 +237,15 @@ export class DataService {
       };
 
       this.ws.onerror = (err) => {
-        console.warn('Coinbase WS error, maintaining REST backup and reconnecting:', err);
+        console.warn('Coinbase WS error, starting REST fallback:', err);
+        this.startCoinbasePollFallback();
       };
 
       this.ws.onclose = () => {
         this.isConnected = false;
         clearInterval(this.pingInterval);
-        this.emit('status', { status: 'REST BACKUP ACTIVE', latency: 30 });
+        this.startCoinbasePollFallback();
+        this.emit('status', { status: 'REST BACKUP ACTIVE', latency: 45 });
         const timeout = Math.min(6000, 1200 * Math.pow(1.3, this.reconnectAttempts++));
         setTimeout(() => {
           if (this.feedSource === 'POLYMARKET_USD') this.connectCoinbaseWs();
@@ -276,6 +253,47 @@ export class DataService {
       };
     } catch (e) {
       console.warn('Coinbase WS init exception:', e);
+      this.startCoinbasePollFallback();
+    }
+  }
+
+  startCoinbasePollFallback() {
+    if (this.coinbasePollInterval) return;
+    this.coinbasePollInterval = setInterval(async () => {
+      if (this.feedSource !== 'POLYMARKET_USD' || this.isConnected) return;
+      try {
+        const res = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot');
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.data && json.data.amount) {
+            const price = parseFloat(json.data.amount);
+            const now = Date.now();
+            this.handleTrade({
+              p: price,
+              q: 0.05,
+              T: now,
+              m: false
+            });
+            const minSec = Math.floor(now / 60000) * 60;
+            this.emit('kline1m', {
+              time: minSec,
+              open: price,
+              high: price,
+              low: price,
+              close: price,
+              volume: 0.05,
+              isClosed: false
+            });
+          }
+        }
+      } catch (e) {}
+    }, 1200);
+  }
+
+  stopCoinbasePoll() {
+    if (this.coinbasePollInterval) {
+      clearInterval(this.coinbasePollInterval);
+      this.coinbasePollInterval = null;
     }
   }
 

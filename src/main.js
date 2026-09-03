@@ -376,8 +376,21 @@ class App {
         this.chart.updateCandle(lastCandle);
       }
 
-      // Notify round manager with live price
-      roundManager.tick(price);
+      // Smoothly update round manager's price without triggering full tick cycle
+      roundManager.updateCurrentPrice(price);
+
+      // Smoothly update live strike comparison on round banner
+      if (roundManager.currentRound) {
+        this.dom.roundLivePrice.textContent = `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const lockPrice = roundManager.currentRound.lockPrice;
+        if (lockPrice > 0) {
+          const delta = price - lockPrice;
+          const deltaPct = (delta / lockPrice) * 100;
+          const isPos = delta >= 0;
+          this.dom.roundDelta.textContent = `${isPos ? '+' : ''}$${delta.toFixed(2)} (${isPos ? '+' : ''}${deltaPct.toFixed(3)}%)`;
+          this.dom.roundDelta.className = `delta-badge ${isPos ? 'positive' : 'negative'}`;
+        }
+      }
     });
 
     // 1-Minute Kline Updates
@@ -396,20 +409,24 @@ class App {
 
       this.chart.updateCandle(candle);
 
-      // Run Quant Analysis every 1m bar or on substantial updates
-      const cvdData = dataService.getCumulativeVolumeDelta(60);
-      const lockPrice = roundManager.currentRound ? roundManager.currentRound.lockPrice : null;
-      this.latestAnalysis = predictorEngine.analyzeMarket({
-        candles1m: this.candles1m,
-        candles5m: this.candles5m,
-        candles15m: this.candles15m,
-        currentPrice: candle.close,
-        cvdData,
-        lockPrice
-      });
+      // Throttle Quant Analysis to prevent UI freezing/stutter (every 3 seconds or on new candle close)
+      const now = Date.now();
+      if (!this.lastQuantTime || now - this.lastQuantTime >= 3000 || candle.isClosed) {
+        this.lastQuantTime = now;
+        const cvdData = dataService.getCumulativeVolumeDelta(60);
+        const lockPrice = roundManager.currentRound ? roundManager.currentRound.lockPrice : null;
+        this.latestAnalysis = predictorEngine.analyzeMarket({
+          candles1m: this.candles1m,
+          candles5m: this.candles5m,
+          candles15m: this.candles15m,
+          currentPrice: candle.close,
+          cvdData,
+          lockPrice
+        });
 
-      roundManager.updatePrediction(this.latestAnalysis);
-      this.renderTraderBrain(this.latestAnalysis);
+        roundManager.updatePrediction(this.latestAnalysis);
+        this.renderTraderBrain(this.latestAnalysis);
+      }
     });
 
     // 5-Minute Kline Updates
@@ -454,7 +471,7 @@ class App {
 
     // WebSocket Status
     dataService.subscribe('status', ({ status, latency }) => {
-      if (status === 'CONNECTED') {
+      if (status.startsWith('CONNECTED')) {
         this.dom.wsBadge.className = 'status-indicator-pill live';
         this.dom.wsText.textContent = 'LIVE';
         this.dom.wsLatency.textContent = `${latency}ms`;
@@ -467,21 +484,26 @@ class App {
   }
 
   updateLivePriceDisplay(price) {
+    if (!price || isNaN(price)) return;
     const formatted = `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     this.dom.livePrice.textContent = formatted;
 
-    if (this.prevPrice) {
+    const now = Date.now();
+    if (this.prevPrice && (!this.lastFlashTime || now - this.lastFlashTime >= 350)) {
       if (price > this.prevPrice) {
         this.dom.livePrice.classList.add('price-flash-up');
         this.dom.livePrice.classList.remove('price-flash-down');
+        this.lastFlashTime = now;
       } else if (price < this.prevPrice) {
         this.dom.livePrice.classList.add('price-flash-down');
         this.dom.livePrice.classList.remove('price-flash-up');
+        this.lastFlashTime = now;
       }
 
-      setTimeout(() => {
+      clearTimeout(this.flashTimer);
+      this.flashTimer = setTimeout(() => {
         this.dom.livePrice.classList.remove('price-flash-up', 'price-flash-down');
-      }, 400);
+      }, 250);
     }
     this.prevPrice = price;
   }

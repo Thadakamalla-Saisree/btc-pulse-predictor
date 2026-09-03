@@ -154,6 +154,11 @@ export class RoundManager {
     }
   }
 
+  updateCurrentPrice(price) {
+    if (!this.currentRound || !price || isNaN(price)) return;
+    this.currentRound.currentPrice = parseFloat(price.toFixed(2));
+  }
+
   startClock() {
     clearInterval(this.timerInterval);
     this.timerInterval = setInterval(() => {
@@ -161,7 +166,7 @@ export class RoundManager {
     }, 1000);
   }
 
-  // Called every second
+  // Called strictly once per second by timerInterval
   tick(currentPrice = null) {
     if (!this.currentRound) return;
 
