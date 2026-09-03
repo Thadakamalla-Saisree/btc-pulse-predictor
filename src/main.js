@@ -53,25 +53,33 @@ class App {
       console.warn('Initial klines load error:', e);
     }
 
-    // 3. Perform Initial Multi-Timeframe Quant Analysis
+    // 3. Compute 60-Second TWAP Strike and Polymarket Odds
     const currentPrice = this.prevPrice || 75000;
+    const twapStrike = this.calculate60sTWAP(this.candles1m, currentPrice);
     const cvdData = dataService.getCumulativeVolumeDelta(60);
+    const polyOdds = (polymarketService.latestMarket && polymarketService.latestMarket.upOdds) ? {
+      upOdds: polymarketService.latestMarket.upOdds,
+      downOdds: polymarketService.latestMarket.downOdds
+    } : null;
+
+    // 4. Perform Initial Multi-Timeframe Quant Analysis with True Strike & Odds
     this.latestAnalysis = predictorEngine.analyzeMarket({
       candles1m: this.candles1m,
       candles5m: this.candles5m,
       candles15m: this.candles15m,
       currentPrice,
-      cvdData
+      cvdData,
+      lockPrice: twapStrike,
+      polyOdds
     });
 
     this.renderTraderBrain(this.latestAnalysis);
 
-    // 4. Setup Subscriptions FIRST before initializing round
+    // 5. Setup Subscriptions FIRST before initializing round
     this.setupRoundSubscriptions();
     this.setupDataSubscriptions();
 
-    // 5. Initialize 5-Minute Round Manager with 60-Second TWAP Strike for Polymarket
-    const twapStrike = this.calculate60sTWAP(this.candles1m, currentPrice);
+    // 6. Initialize 5-Minute Round Manager with 60-Second TWAP Strike for Polymarket
     roundManager.initRound(currentPrice, this.latestAnalysis, twapStrike);
 
     // 6. Explicitly render the active round on screen immediately
@@ -458,13 +466,19 @@ class App {
         this.lastQuantTime = now;
         const cvdData = dataService.getCumulativeVolumeDelta(60);
         const lockPrice = roundManager.currentRound ? roundManager.currentRound.lockPrice : null;
+        const polyOdds = (polymarketService.latestMarket && polymarketService.latestMarket.upOdds) ? {
+          upOdds: polymarketService.latestMarket.upOdds,
+          downOdds: polymarketService.latestMarket.downOdds
+        } : null;
+
         this.latestAnalysis = predictorEngine.analyzeMarket({
           candles1m: this.candles1m,
           candles5m: this.candles5m,
           candles15m: this.candles15m,
           currentPrice: candle.close,
           cvdData,
-          lockPrice
+          lockPrice,
+          polyOdds
         });
 
         roundManager.updatePrediction(this.latestAnalysis);

@@ -107,22 +107,70 @@ export class PredictorEngine {
     let bearScore = 50;
     const rationale = [];
 
-    // Factor 1: MTF Macro Higher Timeframe Dominance (15M & 5M)
+    // Factor 1: MTF Context (Measured, balanced weighting)
     const isMacroBull = mtf15mBias === 'BULLISH' && mtf5mBias === 'BULLISH';
     const isMacroBear = mtf15mBias === 'BEARISH' && mtf5mBias === 'BEARISH';
 
     if (isTripleBull) {
-      bullScore += 45;
-      rationale.push(`Triple MTF Confluence: 15M, 5M & 1M all Bullish (+45 pts)`);
+      bullScore += 20;
+      rationale.push(`Triple MTF Trend: 15M, 5M & 1M Bullish (+20 pts)`);
     } else if (isTripleBear) {
-      bearScore += 45;
-      rationale.push(`Triple MTF Confluence: 15M, 5M & 1M all Bearish (+45 pts)`);
+      bearScore += 20;
+      rationale.push(`Triple MTF Trend: 15M, 5M & 1M Bearish (+20 pts)`);
     } else if (isMacroBull) {
-      bullScore += 35;
-      rationale.push(`Macro Trend Up: 15M & 5M Bullish Structure (+35 pts)`);
+      bullScore += 15;
+      rationale.push(`Macro Trend: 15M & 5M Bullish (+15 pts)`);
     } else if (isMacroBear) {
-      bearScore += 35;
-      rationale.push(`Macro Trend Down: 15M & 5M Bearish Structure (+35 pts)`);
+      bearScore += 15;
+      rationale.push(`Macro Trend: 15M & 5M Bearish (+15 pts)`);
+    }
+
+    // Factor 1B: 5-Minute Cycle Run Exhaustion (Mean Reversion Wave Model)
+    if (candles5m && candles5m.length >= 3) {
+      const c1 = candles5m[candles5m.length - 1];
+      const c2 = candles5m[candles5m.length - 2];
+      const c3 = candles5m[candles5m.length - 3];
+
+      let greenRun5m = 0;
+      let redRun5m = 0;
+
+      if (c1.close > c1.open) {
+        greenRun5m = 1;
+        if (c2.close > c2.open) {
+          greenRun5m = 2;
+          if (c3.close > c3.open) greenRun5m = 3;
+        }
+      } else {
+        redRun5m = 1;
+        if (c2.close < c2.open) {
+          redRun5m = 2;
+          if (c3.close < c3.open) redRun5m = 3;
+        }
+      }
+
+      const body5mLast = Math.abs(c1.close - c1.open);
+
+      if (greenRun5m >= 3) {
+        bearScore += 55;
+        rationale.unshift(`⚠️ 3 Consecutive Green 5M Bars: Cycle Exhaustion (70.8% Pullback Risk)`);
+      } else if (greenRun5m === 2) {
+        bearScore += 35;
+        rationale.push(`2 Consecutive Green 5M Bars: Pullback Cycle Precaution`);
+      } else if (greenRun5m === 1 && body5mLast > 30) {
+        bullScore += 25;
+        rationale.push(`Green Expansion Candle: Continuation Momentum`);
+      }
+
+      if (redRun5m >= 3) {
+        bullScore += 55;
+        rationale.unshift(`⚠️ 3 Consecutive Red 5M Bars: Cycle Bottom (70%+ Relief Bounce Edge)`);
+      } else if (redRun5m === 2) {
+        bullScore += 35;
+        rationale.push(`2 Consecutive Red 5M Bars: Relief Bounce Precaution`);
+      } else if (redRun5m === 1 && body5mLast > 30) {
+        bearScore += 25;
+        rationale.push(`Red Breakdown Candle: Continuation Momentum`);
+      }
     }
 
     // Factor 2: 1M Candle Runs with Anti-Chasing RSI Guard
@@ -138,18 +186,18 @@ export class PredictorEngine {
       rationale.push(`1M Oversold Exhaustion (${rsiData1m.rsi.toFixed(0)} RSI) - High Bounce Potential`);
     } else if (redBars >= 3 && currentPrice < curEma9_1m) {
       if (isMacroBull && rsiData1m.rsi <= 42) {
-        bullScore += 25;
-        rationale.push(`Dip Absorption: 1M pullback (${rsiData1m.rsi.toFixed(0)} RSI) into Macro Bullish Support`);
+        bullScore += 20;
+        rationale.push(`Dip Absorption: 1M pullback (${rsiData1m.rsi.toFixed(0)} RSI) into Support`);
       } else {
-        bearScore += 22;
+        bearScore += 20;
         rationale.push(`Active 1M Selloff: ${redBars} of last 4 candles RED below EMA-9`);
       }
     } else if (greenBars >= 3 && currentPrice > curEma9_1m) {
       if (isMacroBear && rsiData1m.rsi >= 60) {
-        bearScore += 25;
-        rationale.push(`Exhaustion into Resistance: 1M surge (${rsiData1m.rsi.toFixed(0)} RSI) into Bearish Trend`);
+        bearScore += 20;
+        rationale.push(`Exhaustion into Resistance: 1M surge (${rsiData1m.rsi.toFixed(0)} RSI)`);
       } else {
-        bullScore += 22;
+        bullScore += 20;
         rationale.push(`Active 1M Surge: ${greenBars} of last 4 candles GREEN above EMA-9`);
       }
     }
@@ -163,12 +211,12 @@ export class PredictorEngine {
       const lowerWick5m = Math.min(prev5m.open, prev5m.close) - prev5m.low;
 
       if (range5m >= 15) {
-        if (lowerWick5m > body5m * 1.3 && lowerWick5m > upperWick5m * 1.5) {
-          bullScore += 30;
-          rationale.push(`5M Bullish Wick Absorption: Lower wick absorbed dump ($${prev5m.low.toFixed(0)})`);
-        } else if (upperWick5m > body5m * 1.3 && upperWick5m > lowerWick5m * 1.5) {
-          bearScore += 30;
-          rationale.push(`5M Bearish Wick Rejection: Sellers rejected high ($${prev5m.high.toFixed(0)})`);
+        if (lowerWick5m > body5m * 1.2 && lowerWick5m > upperWick5m * 1.4) {
+          bullScore += 45;
+          rationale.unshift(`🎯 5M Hammer / Wick Absorption: Buyers absorbed dip at $${prev5m.low.toFixed(0)}`);
+        } else if (upperWick5m > body5m * 1.2 && upperWick5m > lowerWick5m * 1.4) {
+          bearScore += 45;
+          rationale.unshift(`🎯 5M Shooting Star / Wick Rejection: Sellers rejected high at $${prev5m.high.toFixed(0)}`);
         }
       }
     }
