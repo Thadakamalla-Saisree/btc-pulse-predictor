@@ -1963,6 +1963,104 @@ body {
 }
 
 /* ==========================================================================
+   ACTIONABLE QUANT TRADE ADVISOR BANNER
+   ========================================================================== */
+.actionable-trade-banner {
+  margin: 12px 0 16px 0;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.actionable-trade-banner.action-up {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(6, 78, 59, 0.25) 100%);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.25);
+}
+
+.actionable-trade-banner.action-down {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(127, 29, 29, 0.25) 100%);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.25);
+}
+
+.actionable-trade-banner.action-neutral {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(120, 53, 15, 0.2) 100%);
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.15);
+}
+
+.action-badge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.action-badge-pill {
+  font-family: var(--font-heading);
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.action-up .action-badge-pill {
+  color: #34d399;
+}
+
+.action-down .action-badge-pill {
+  color: #f87171;
+}
+
+.action-neutral .action-badge-pill {
+  color: #fbbf24;
+}
+
+.action-badge-edge {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+}
+
+.action-up .action-badge-edge {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #6ee7b7;
+}
+
+.action-down .action-badge-edge {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.action-neutral .action-badge-edge {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fcd34d;
+}
+
+.action-badge-desc {
+  font-size: 0.76rem;
+  color: #cbd5e1;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+/* ==========================================================================
    RESPONSIVE DESIGN
    ========================================================================== */
 @media (max-width: 1080px) {

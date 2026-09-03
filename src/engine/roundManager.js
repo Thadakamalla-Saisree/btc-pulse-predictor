@@ -123,6 +123,10 @@ export class RoundManager {
       confidence: latestPrediction && latestPrediction.confidence ? latestPrediction.confidence : 78,
       grade: latestPrediction && latestPrediction.grade ? latestPrediction.grade : 'GRADE A (STRONG CONVICTION)',
       gradeColor: latestPrediction && latestPrediction.gradeColor ? latestPrediction.gradeColor : 'grade-a',
+      recommendation: latestPrediction && latestPrediction.recommendation ? latestPrediction.recommendation : 'SKIP_NO_EDGE',
+      actionBadge: latestPrediction && latestPrediction.actionBadge ? latestPrediction.actionBadge : '⚠️ SCANNING MARKET EDGE...',
+      actionSubtitle: latestPrediction && latestPrediction.actionSubtitle ? latestPrediction.actionSubtitle : 'Evaluating order flow & MTF structure',
+      actionClass: latestPrediction && latestPrediction.actionClass ? latestPrediction.actionClass : 'action-neutral',
       marketRegime: latestPrediction && latestPrediction.marketRegime ? latestPrediction.marketRegime : 'CHOPPY_RANGE',
       regimeLabel: latestPrediction && latestPrediction.regimeLabel ? latestPrediction.regimeLabel : 'CHOPPY RANGE ⚖️',
       mtf: latestPrediction && latestPrediction.mtf ? latestPrediction.mtf : { m15: 'BULLISH', m5: 'BULLISH', m1: 'BULLISH' },
@@ -144,6 +148,10 @@ export class RoundManager {
     if (!this.currentRound || !latestPrediction) return;
     this.currentRound.grade = latestPrediction.grade || this.currentRound.grade;
     this.currentRound.gradeColor = latestPrediction.gradeColor || this.currentRound.gradeColor;
+    this.currentRound.recommendation = latestPrediction.recommendation || this.currentRound.recommendation;
+    this.currentRound.actionBadge = latestPrediction.actionBadge || this.currentRound.actionBadge;
+    this.currentRound.actionSubtitle = latestPrediction.actionSubtitle || this.currentRound.actionSubtitle;
+    this.currentRound.actionClass = latestPrediction.actionClass || this.currentRound.actionClass;
     this.currentRound.marketRegime = latestPrediction.marketRegime || this.currentRound.marketRegime;
     this.currentRound.regimeLabel = latestPrediction.regimeLabel || this.currentRound.regimeLabel;
     this.currentRound.mtf = latestPrediction.mtf || this.currentRound.mtf;

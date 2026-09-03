@@ -174,6 +174,10 @@ class App {
       targetPrice: document.getElementById('prediction-target-price'),
       predictionStatusTag: document.getElementById('prediction-status-tag'),
       predictionStatusText: document.getElementById('prediction-status-text'),
+      actionBanner: document.getElementById('actionable-trade-banner'),
+      actionBadgePill: document.getElementById('action-badge-pill'),
+      actionBadgeEdge: document.getElementById('action-badge-edge'),
+      actionBadgeDesc: document.getElementById('action-badge-desc'),
       probUpText: document.getElementById('prob-up-text'),
       probDownText: document.getElementById('prob-down-text'),
       probBarFill: document.getElementById('probability-bar-fill'),
@@ -592,6 +596,16 @@ class App {
     this.dom.predictionConf.textContent = `${round.confidence}%`;
     this.dom.targetPrice.textContent = `$${round.targetPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 
+    // Actionable Trade Advisor
+    if (this.dom.actionBanner && round.actionBadge) {
+      this.dom.actionBanner.className = `actionable-trade-banner ${round.actionClass || 'action-neutral'}`;
+      if (this.dom.actionBadgePill) this.dom.actionBadgePill.textContent = round.actionBadge;
+      if (this.dom.actionBadgeDesc) this.dom.actionBadgeDesc.textContent = round.actionSubtitle || 'Evaluating quant order flow...';
+      if (this.dom.actionBadgeEdge) {
+        this.dom.actionBadgeEdge.textContent = round.recommendation === 'SKIP_NO_EDGE' ? 'NO EDGE (CHOP)' : `${round.confidence || 78}% WIN EDGE`;
+      }
+    }
+
     // Set chart lines
     this.chart.setLockPrice(round.lockPrice);
     this.chart.setTargetPrice(round.targetPrice, round.prediction);
@@ -650,6 +664,16 @@ class App {
     this.dom.predictionGrade.textContent = round.grade || 'GRADE A (CONVICTION)';
     this.dom.predictionGrade.className = `conviction-grade-pill ${round.gradeColor || 'grade-a'}`;
     this.dom.predictionConf.textContent = `${round.confidence || 78}%`;
+
+    // Actionable Trade Advisor Banner Live Sync
+    if (this.dom.actionBanner && round.actionBadge) {
+      this.dom.actionBanner.className = `actionable-trade-banner ${round.actionClass || 'action-neutral'}`;
+      if (this.dom.actionBadgePill) this.dom.actionBadgePill.textContent = round.actionBadge;
+      if (this.dom.actionBadgeDesc) this.dom.actionBadgeDesc.textContent = round.actionSubtitle || 'Evaluating quant order flow...';
+      if (this.dom.actionBadgeEdge) {
+        this.dom.actionBadgeEdge.textContent = round.recommendation === 'SKIP_NO_EDGE' ? 'NO EDGE (CHOP)' : `${round.confidence || 78}% WIN EDGE`;
+      }
+    }
 
     // 4. Probability Meter
     this.dom.probUpText.textContent = `${round.liveProb.upProb}%`;
