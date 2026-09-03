@@ -97,12 +97,29 @@ class App {
 
   calculate60sTWAP(candles1m, fallbackPrice) {
     if (!candles1m || candles1m.length === 0) return fallbackPrice;
-    const prevCandle = candles1m[candles1m.length - 1];
-    if (prevCandle) {
-      // Chainlink 60-Second TWAP formula: (Open + High + Low + 2*Close) / 5
-      const twap = (prevCandle.open + prevCandle.high + prevCandle.low + 2 * prevCandle.close) / 5;
-      return parseFloat(twap.toFixed(2));
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const roundStartSec = Math.floor(nowSec / 300) * 300;
+
+    // 1. Look for the candle at roundStartSec - 60 (the 60s lookback candle immediately preceding round start)
+    const lookbackCandle = candles1m.find(c => c.time === roundStartSec - 60);
+    if (lookbackCandle) {
+      return parseFloat(lookbackCandle.close.toFixed(2));
     }
+
+    // 2. Look for the candle at roundStartSec (the opening candle of this 5m window)
+    const roundOpenCandle = candles1m.find(c => c.time === roundStartSec);
+    if (roundOpenCandle) {
+      return parseFloat(roundOpenCandle.open.toFixed(2));
+    }
+
+    // 3. Fallback: Find nearest candle before or at roundStartSec
+    const priorCandles = candles1m.filter(c => c.time <= roundStartSec);
+    if (priorCandles.length > 0) {
+      const nearest = priorCandles[priorCandles.length - 1];
+      return parseFloat(nearest.close.toFixed(2));
+    }
+
     return fallbackPrice;
   }
 

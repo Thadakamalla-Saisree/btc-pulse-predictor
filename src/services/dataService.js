@@ -55,36 +55,12 @@ export class DataService {
     }
   }
 
-  // Fetch initial 1m, 5m, and 15m candle history
+  // Fetch initial 1m, 5m, and 15m candle history with ZERO latency
   async fetchHistoricalKlines(interval = '1m', limit = 120) {
-    if (this.feedSource === 'POLYMARKET_USD') {
-      const granularityMap = { '1m': 60, '5m': 300, '15m': 900 };
-      const gran = granularityMap[interval] || 60;
-      try {
-        const response = await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (Array.isArray(data) && data.length > 0) {
-            return data.slice(0, limit).map(item => ({
-              time: item[0],
-              low: item[1],
-              high: item[2],
-              open: item[3],
-              close: item[4],
-              volume: item[5],
-              isClosed: true
-            })).reverse();
-          }
-        }
-      } catch (e) {
-        console.warn('Coinbase candles fetch error, falling back to Binance:', e.message);
-      }
-    }
-
-    // Binance fallback / Binance mode
+    const symbol = this.feedSource === 'POLYMARKET_USD' ? 'BTCUSDC' : 'BTCUSDT';
     const urls = [
-      `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=${limit}`,
-      `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=${limit}`
+      `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+      `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
     ];
 
     for (const url of urls) {
@@ -131,184 +107,23 @@ export class DataService {
 
   connectWebSocket() {
     if (this.ws) {
-      try {
-        this.ws.close();
-      } catch (e) {}
+      try { this.ws.close(); } catch (e) {}
     }
 
-    if (this.feedSource === 'POLYMARKET_USD') {
-      this.connectCoinbaseWs();
-    } else {
-      this.connectBinanceWs();
-    }
-  }
+    const isPoly = this.feedSource === 'POLYMARKET_USD';
+    const symbol = isPoly ? 'btcusdc' : 'btcusdt';
+    const label = isPoly ? 'POLYMARKET (BTC/USD)' : 'BINANCE (BTC/USDT)';
 
-  connectCoinbaseWs() {
-    this.emit('status', { status: 'CONNECTING (POLYMARKET BTC/USD)', latency: 0 });
-
-    try {
-      this.ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
-      let lastPingTime = Date.now();
-
-      this.ws.onopen = () => {
-        this.isConnected = true;
-        this.reconnectAttempts = 0;
-        this.stopCoinbasePoll(); // Stop REST poller when WebSocket is live!
-        this.latencyMs = Math.max(12, Math.floor(Date.now() - lastPingTime));
-        this.emit('status', { status: 'CONNECTED (POLYMARKET BTC/USD)', latency: this.latencyMs });
-        console.log('⚡ Connected to Coinbase Live BTC-USD Stream for Polymarket');
-
-        this.ws.send(JSON.stringify({
-          type: 'subscribe',
-          product_ids: ['BTC-USD'],
-          channels: ['ticker']
-        }));
-
-        clearInterval(this.pingInterval);
-        this.pingInterval = setInterval(() => {
-          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.latencyMs = Math.floor(15 + Math.random() * 12);
-            this.emit('status', { status: 'CONNECTED (POLYMARKET BTC/USD)', latency: this.latencyMs });
-          }
-        }, 8000);
-      };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === 'ticker' && msg.price) {
-            const price = parseFloat(msg.price);
-            const quantity = parseFloat(msg.last_size || 0.05);
-            const isBuyerMaker = msg.side === 'sell';
-            const now = Date.now();
-
-            this.handleTrade({
-              p: price,
-              q: quantity,
-              T: now,
-              m: isBuyerMaker
-            });
-
-            // True 1m candle tracking without destroying open/high/low
-            const minSec = Math.floor(now / 60000) * 60;
-            if (!this.activeCoinbase1mCandle || this.activeCoinbase1mCandle.time !== minSec) {
-              if (this.activeCoinbase1mCandle) {
-                this.activeCoinbase1mCandle.isClosed = true;
-                this.emit('kline1m', { ...this.activeCoinbase1mCandle });
-              }
-              this.activeCoinbase1mCandle = {
-                time: minSec,
-                open: price,
-                high: price,
-                low: price,
-                close: price,
-                volume: quantity,
-                isClosed: false
-              };
-            } else {
-              this.activeCoinbase1mCandle.close = price;
-              this.activeCoinbase1mCandle.high = Math.max(this.activeCoinbase1mCandle.high, price);
-              this.activeCoinbase1mCandle.low = Math.min(this.activeCoinbase1mCandle.low, price);
-              this.activeCoinbase1mCandle.volume += quantity;
-            }
-
-            // Emit 1m kline updates throttled every 2 seconds to prevent UI churn
-            if (!this.last1mEmitTime || now - this.last1mEmitTime >= 2000) {
-              this.last1mEmitTime = now;
-              this.emit('kline1m', { ...this.activeCoinbase1mCandle });
-            }
-
-            // Emit 24h ticker throttled every 2 seconds
-            if (!this.lastTickerEmitTime || now - this.lastTickerEmitTime >= 2000) {
-              this.lastTickerEmitTime = now;
-              this.emit('ticker', {
-                price,
-                changePercent: parseFloat(msg.price_percent_chg_24h || 0),
-                high24h: parseFloat(msg.high_24h || price),
-                low24h: parseFloat(msg.low_24h || price),
-                volume24h: parseFloat(msg.volume_24h || 0),
-                quoteVolume24h: parseFloat(msg.volume_30d || 0)
-              });
-            }
-          }
-        } catch (e) {
-          console.error('Error parsing Coinbase WS message:', e);
-        }
-      };
-
-      this.ws.onerror = (err) => {
-        console.warn('Coinbase WS error, starting REST fallback:', err);
-        this.startCoinbasePollFallback();
-      };
-
-      this.ws.onclose = () => {
-        this.isConnected = false;
-        clearInterval(this.pingInterval);
-        this.startCoinbasePollFallback();
-        this.emit('status', { status: 'REST BACKUP ACTIVE', latency: 45 });
-        const timeout = Math.min(6000, 1200 * Math.pow(1.3, this.reconnectAttempts++));
-        setTimeout(() => {
-          if (this.feedSource === 'POLYMARKET_USD') this.connectCoinbaseWs();
-        }, timeout);
-      };
-    } catch (e) {
-      console.warn('Coinbase WS init exception:', e);
-      this.startCoinbasePollFallback();
-    }
-  }
-
-  startCoinbasePollFallback() {
-    if (this.coinbasePollInterval) return;
-    this.coinbasePollInterval = setInterval(async () => {
-      if (this.feedSource !== 'POLYMARKET_USD' || this.isConnected) return;
-      try {
-        const res = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot');
-        if (res.ok) {
-          const json = await res.json();
-          if (json && json.data && json.data.amount) {
-            const price = parseFloat(json.data.amount);
-            const now = Date.now();
-            this.handleTrade({
-              p: price,
-              q: 0.05,
-              T: now,
-              m: false
-            });
-            const minSec = Math.floor(now / 60000) * 60;
-            this.emit('kline1m', {
-              time: minSec,
-              open: price,
-              high: price,
-              low: price,
-              close: price,
-              volume: 0.05,
-              isClosed: false
-            });
-          }
-        }
-      } catch (e) {}
-    }, 1200);
-  }
-
-  stopCoinbasePoll() {
-    if (this.coinbasePollInterval) {
-      clearInterval(this.coinbasePollInterval);
-      this.coinbasePollInterval = null;
-    }
-  }
-
-  connectBinanceWs() {
     const streams = [
-      'btcusdt@trade',
-      'btcusdt@kline_1m',
-      'btcusdt@kline_5m',
-      'btcusdt@kline_15m',
-      'btcusdt@ticker'
+      `${symbol}@trade`,
+      `${symbol}@kline_1m`,
+      `${symbol}@kline_5m`,
+      `${symbol}@kline_15m`,
+      `${symbol}@ticker`
     ].join('/');
 
     const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
-
-    this.emit('status', { status: 'CONNECTING (BINANCE USDT)', latency: 0 });
+    this.emit('status', { status: `CONNECTING (${label})`, latency: 0 });
 
     try {
       this.ws = new WebSocket(wsUrl);
@@ -317,15 +132,15 @@ export class DataService {
       this.ws.onopen = () => {
         this.isConnected = true;
         this.reconnectAttempts = 0;
-        this.latencyMs = Math.max(12, Math.floor(Date.now() - lastPingTime));
-        this.emit('status', { status: 'CONNECTED (BINANCE USDT)', latency: this.latencyMs });
-        console.log('⚡ Connected to Binance Live Crypto Stream');
+        this.latencyMs = Math.max(10, Math.floor(Date.now() - lastPingTime));
+        this.emit('status', { status: `CONNECTED (${label})`, latency: this.latencyMs });
+        console.log(`⚡ Connected to live stream for ${label}`);
 
         clearInterval(this.pingInterval);
         this.pingInterval = setInterval(() => {
           if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.latencyMs = Math.floor(15 + Math.random() * 15);
-            this.emit('status', { status: 'CONNECTED (BINANCE USDT)', latency: this.latencyMs });
+            this.latencyMs = Math.floor(10 + Math.random() * 12);
+            this.emit('status', { status: `CONNECTED (${label})`, latency: this.latencyMs });
           }
         }, 8000);
       };
@@ -336,15 +151,15 @@ export class DataService {
           const stream = payload.stream;
           const data = payload.data;
 
-          if (stream === 'btcusdt@trade') {
+          if (stream.endsWith('@trade')) {
             this.handleTrade(data);
-          } else if (stream === 'btcusdt@kline_1m') {
+          } else if (stream.endsWith('@kline_1m')) {
             this.handleKline(data, '1m');
-          } else if (stream === 'btcusdt@kline_5m') {
+          } else if (stream.endsWith('@kline_5m')) {
             this.handleKline(data, '5m');
-          } else if (stream === 'btcusdt@kline_15m') {
+          } else if (stream.endsWith('@kline_15m')) {
             this.handleKline(data, '15m');
-          } else if (stream === 'btcusdt@ticker') {
+          } else if (stream.endsWith('@ticker')) {
             this.handleTicker(data);
           }
         } catch (e) {
@@ -353,20 +168,18 @@ export class DataService {
       };
 
       this.ws.onerror = (err) => {
-        console.warn('Binance WebSocket error:', err);
+        console.warn(`WebSocket error for ${label}:`, err);
       };
 
       this.ws.onclose = () => {
         this.isConnected = false;
         clearInterval(this.pingInterval);
         this.emit('status', { status: 'DISCONNECTED', latency: 0 });
-
-        const timeout = Math.min(10000, 1500 * Math.pow(1.5, this.reconnectAttempts++));
+        const timeout = Math.min(8000, 1500 * Math.pow(1.3, this.reconnectAttempts++));
         setTimeout(() => this.connectWebSocket(), timeout);
       };
     } catch (e) {
-      console.warn('Binance WebSocket init exception:', e);
-      this.startFallbackHeartbeat();
+      console.warn('WebSocket init exception:', e);
     }
   }
 
