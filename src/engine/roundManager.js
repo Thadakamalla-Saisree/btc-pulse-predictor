@@ -147,18 +147,9 @@ export class RoundManager {
   updatePrediction(latestPrediction) {
     if (!this.currentRound || !latestPrediction) return;
 
-    // Synchronize directional prediction when institutional high conviction is confirmed
-    if (latestPrediction.recommendation === 'TRADE_UP' || latestPrediction.recommendation === 'TRADE_DOWN') {
-      this.currentRound.prediction = latestPrediction.prediction;
-      this.currentRound.confidence = latestPrediction.confidence;
-    }
-
-    this.currentRound.grade = latestPrediction.grade || this.currentRound.grade;
-    this.currentRound.gradeColor = latestPrediction.gradeColor || this.currentRound.gradeColor;
-    this.currentRound.recommendation = latestPrediction.recommendation || this.currentRound.recommendation;
-    this.currentRound.actionBadge = latestPrediction.actionBadge || this.currentRound.actionBadge;
-    this.currentRound.actionSubtitle = latestPrediction.actionSubtitle || this.currentRound.actionSubtitle;
-    this.currentRound.actionClass = latestPrediction.actionClass || this.currentRound.actionClass;
+    // The official round prediction, grade, and action badge are 100% LOCKED at round start (00:00).
+    // They must NEVER flip or change mid-round regardless of market fluctuations!
+    // We only update background indicator telemetry and rationale for the quant brain.
     this.currentRound.marketRegime = latestPrediction.marketRegime || this.currentRound.marketRegime;
     this.currentRound.regimeLabel = latestPrediction.regimeLabel || this.currentRound.regimeLabel;
     this.currentRound.mtf = latestPrediction.mtf || this.currentRound.mtf;
