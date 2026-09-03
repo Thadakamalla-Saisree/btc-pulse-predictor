@@ -186,6 +186,24 @@ export class RoundManager {
     );
     this.currentRound.liveProb = liveProb;
 
+    // Dynamic Directional Alignment with Price to Beat (Lock Price)
+    const strikeDelta = this.currentRound.currentPrice - this.currentRound.lockPrice;
+    if (Math.abs(strikeDelta) >= 15) {
+      const liveDominantDir = strikeDelta > 0 ? 'UP' : 'DOWN';
+      if (this.currentRound.prediction !== liveDominantDir) {
+        this.currentRound.prediction = liveDominantDir;
+        this.currentRound.confidence = Math.min(94, 75 + Math.floor(Math.abs(strikeDelta) / 4));
+        this.currentRound.grade = 'GRADE A (DIRECTIONAL MOMENTUM)';
+        this.currentRound.gradeColor = 'grade-a';
+        this.currentRound.rationale = [
+          liveDominantDir === 'DOWN'
+            ? `Price broke -$${Math.abs(strikeDelta).toFixed(1)} below Price to Beat ($${this.currentRound.lockPrice}). Downward momentum dominant.`
+            : `Price broke +$${strikeDelta.toFixed(1)} above Price to Beat ($${this.currentRound.lockPrice}). Upward momentum dominant.`,
+          ...this.currentRound.rationale.filter(r => !r.includes('Price broke')).slice(0, 2)
+        ];
+      }
+    }
+
     // High-Conviction Chainlink Oracle Snipe Trigger
     if (liveProb.chainlinkSnipe && liveProb.chainlinkSnipe.isSnipeActive) {
       this.currentRound.prediction = liveProb.chainlinkSnipe.snipeDirection;
@@ -204,6 +222,13 @@ export class RoundManager {
     } else {
       this.emit({ type: 'TICK', round: this.currentRound });
     }
+  }
+
+  setLockPrice(newPrice) {
+    if (!this.currentRound || !newPrice || isNaN(newPrice)) return;
+    this.currentRound.lockPrice = parseFloat(parseFloat(newPrice).toFixed(2));
+    this.tick();
+    this.emit({ type: 'ROUND_UPDATED', round: this.currentRound });
   }
 
   // Settle the round at 00:00

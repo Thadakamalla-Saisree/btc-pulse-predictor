@@ -112,10 +112,19 @@
                 <div class="price-box lock-box">
                   <div class="box-label">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                    STRIKE / LOCK PRICE
+                    PRICE TO BEAT (STRIKE)
                   </div>
-                  <div id="round-lock-price" class="box-value strike-color">$--,---.--</div>
-                  <div class="box-sub">Locked at round start</div>
+                  <div class="strike-value-row">
+                    <div id="round-lock-price" class="box-value strike-color">$--,---.--</div>
+                    <button id="edit-strike-btn" class="edit-strike-btn" title="Sync or paste your exact platform price to beat">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                    </button>
+                  </div>
+                  <div id="strike-edit-form" class="strike-edit-form hidden">
+                    <input type="number" id="custom-strike-input" class="custom-strike-input" placeholder="e.g. 77683" step="0.01" />
+                    <button id="apply-strike-btn" class="apply-strike-btn">SET</button>
+                  </div>
+                  <div class="box-sub">Platform benchmark to beat</div>
                 </div>
 
                 <div class="price-arrow-divider">

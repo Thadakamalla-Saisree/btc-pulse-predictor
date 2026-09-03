@@ -114,6 +114,10 @@ class App {
       radialProgress: document.getElementById('radial-progress-circle'),
       countdownDigits: document.getElementById('countdown-digits'),
       lockPrice: document.getElementById('round-lock-price'),
+      editStrikeBtn: document.getElementById('edit-strike-btn'),
+      strikeEditForm: document.getElementById('strike-edit-form'),
+      customStrikeInput: document.getElementById('custom-strike-input'),
+      applyStrikeBtn: document.getElementById('apply-strike-btn'),
       roundLivePrice: document.getElementById('round-live-price'),
       roundDelta: document.getElementById('round-price-delta'),
       predictionBanner: document.getElementById('prediction-banner'),
@@ -211,6 +215,37 @@ class App {
       audioService.playTick();
     });
 
+    // Price to Beat (Strike) Manual Sync & Edit
+    if (this.dom.editStrikeBtn) {
+      this.dom.editStrikeBtn.addEventListener('click', () => {
+        this.dom.strikeEditForm.classList.toggle('hidden');
+        if (!this.dom.strikeEditForm.classList.contains('hidden')) {
+          this.dom.customStrikeInput.value = roundManager.currentRound ? roundManager.currentRound.lockPrice : '';
+          this.dom.customStrikeInput.focus();
+        }
+      });
+    }
+
+    if (this.dom.applyStrikeBtn) {
+      this.dom.applyStrikeBtn.addEventListener('click', () => {
+        const val = parseFloat(this.dom.customStrikeInput.value);
+        if (!isNaN(val) && val > 0) {
+          roundManager.setLockPrice(val);
+          this.dom.lockPrice.textContent = `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          this.dom.strikeEditForm.classList.add('hidden');
+          audioService.playTick();
+        }
+      });
+    }
+
+    if (this.dom.customStrikeInput) {
+      this.dom.customStrikeInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          this.dom.applyStrikeBtn.click();
+        }
+      });
+    }
+
     // Timeframe selector
     this.dom.tfBtns.forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -285,12 +320,14 @@ class App {
 
       // Run Quant Analysis every 1m bar or on substantial updates
       const cvdData = dataService.getCumulativeVolumeDelta(60);
+      const lockPrice = roundManager.currentRound ? roundManager.currentRound.lockPrice : null;
       this.latestAnalysis = predictorEngine.analyzeMarket({
         candles1m: this.candles1m,
         candles5m: this.candles5m,
         candles15m: this.candles15m,
         currentPrice: candle.close,
-        cvdData
+        cvdData,
+        lockPrice
       });
 
       roundManager.updatePrediction(this.latestAnalysis);
@@ -373,7 +410,7 @@ class App {
 
   setupRoundSubscriptions() {
     roundManager.subscribe((event) => {
-      if (event.type === 'ROUND_STARTED') {
+      if (event.type === 'ROUND_STARTED' || event.type === 'ROUND_UPDATED') {
         this.renderRoundStarted(event.round);
       } else if (event.type === 'TICK') {
         this.renderRoundTick(event.round);
@@ -388,7 +425,8 @@ class App {
           candles5m: this.candles5m,
           candles15m: this.candles15m,
           currentPrice,
-          cvdData
+          cvdData,
+          lockPrice: currentPrice
         });
         roundManager.initRound(currentPrice, this.latestAnalysis, currentPrice);
       }
@@ -457,6 +495,15 @@ class App {
     const isWinning = round.liveProb.isPredictionWinning;
     this.dom.predictionStatusTag.className = `prediction-status-pill ${isWinning ? 'winning' : 'losing'}`;
     this.dom.predictionStatusText.textContent = isWinning ? 'ON TRACK' : 'TESTING BOUNDS';
+
+    // Synchronize Banner with active Round Prediction
+    const isPredUp = round.prediction === 'UP';
+    this.dom.predictionDir.textContent = isPredUp ? 'UP (CALL)' : 'DOWN (PUT)';
+    this.dom.predictionIcon.textContent = isPredUp ? '▲' : '▼';
+    this.dom.predictionBanner.className = `prediction-banner ${isPredUp ? 'banner-up' : 'banner-down'}`;
+    this.dom.predictionGrade.textContent = round.grade || 'GRADE A (CONVICTION)';
+    this.dom.predictionGrade.className = `conviction-grade-pill ${round.gradeColor || 'grade-a'}`;
+    this.dom.predictionConf.textContent = `${round.confidence || 75}%`;
 
     // 4. Probability Meter
     this.dom.probUpText.textContent = `${round.liveProb.upProb}%`;

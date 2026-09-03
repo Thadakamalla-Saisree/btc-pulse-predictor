@@ -635,6 +635,66 @@ body {
   color: var(--accent-cyan);
 }
 
+.strike-value-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-strike-btn {
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  color: var(--accent-cyan);
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.edit-strike-btn:hover {
+  background: rgba(0, 212, 255, 0.25);
+  border-color: var(--accent-cyan);
+}
+
+.strike-edit-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.custom-strike-input {
+  width: 110px;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 4px;
+  color: #fff;
+  outline: none;
+}
+
+.apply-strike-btn {
+  padding: 4px 10px;
+  background: var(--accent-cyan);
+  color: #000;
+  font-size: 0.72rem;
+  font-weight: 800;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.apply-strike-btn:hover {
+  filter: brightness(1.15);
+}
+
 .box-sub {
   font-size: 0.65rem;
   color: var(--text-muted);
