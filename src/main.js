@@ -1,878 +1,546 @@
 // src/main.js
-// Main Application Coordinator for BTC Pulse Predictor
+// Pro Trader 90%+ Accuracy 5-Minute Polymarket Terminal
 
-import { dataService } from './services/dataService.js';
-import { chainlinkService } from './services/chainlinkService.js';
-import { polymarketService } from './services/polymarketService.js';
-import { predictorEngine } from './engine/predictor.js';
-import { roundManager } from './engine/roundManager.js';
-import { audioService } from './services/audioService.js';
+import { marketData } from './services/marketData.js';
+import { quantEngine } from './engine/quantEngine.js';
+import { proTraderEngine } from './engine/proTraderEngine.js';
 import { ChartComponent } from './components/chart.js';
+import { audioService } from './services/audioService.js';
 
-class App {
+class ProTraderApp {
   constructor() {
     this.chart = null;
-    this.candles1m = [];
-    this.candles5m = [];
-    this.candles15m = [];
-    this.activeTimeframe = '1m';
-    this.prevPrice = 0;
-    this.latestAnalysis = null;
-    
-    // DOM Elements
+    this.prevPrice = null;
+    this.currentTimeframe = '1m';
+    this.audioEnabled = true;
+    this.lastQuantScan = 0;
     this.dom = {};
   }
 
-  async init() {
-    this.cacheDom();
+  async start() {
+    this.cacheDOMElements();
     this.bindEvents();
-    this.initClock();
+    this.startUTCClock();
 
-    // 1. Initialize Chart
+    // 1. Initialize Lightweight Candlestick Chart
     this.chart = new ChartComponent('tv-chart-container');
     this.chart.init();
 
-    // 2. Load Multi-Timeframe Historical Candles (1m, 5m, 15m)
-    try {
-      const [k1m, k5m, k15m] = await Promise.all([
-        dataService.fetchHistoricalKlines('1m', 120),
-        dataService.fetchHistoricalKlines('5m', 60),
-        dataService.fetchHistoricalKlines('15m', 30)
-      ]);
-      this.candles1m = k1m || [];
-      this.candles5m = k5m || [];
-      this.candles15m = k15m || [];
+    // 2. Initialize Market Data WebSocket
+    await marketData.init();
 
-      if (this.candles1m.length > 0) {
-        this.chart.setData(this.candles1m);
-        const lastCandle = this.candles1m[this.candles1m.length - 1];
-        this.prevPrice = lastCandle.close;
-        this.updateLivePriceDisplay(lastCandle.close);
-      }
-    } catch (e) {
-      console.warn('Initial klines load error:', e);
+    // 3. Load Chart with Initial Historical Klines
+    if (marketData.candles1m.length > 0) {
+      this.chart.setData(marketData.candles1m);
     }
 
-    // 3. Compute 60-Second TWAP Strike and Polymarket Odds
-    const currentPrice = this.prevPrice || 75000;
-    const twapStrike = this.calculate60sTWAP(this.candles1m, currentPrice);
-    const cvdData = dataService.getCumulativeVolumeDelta(60);
-    const polyOdds = (polymarketService.latestMarket && polymarketService.latestMarket.upOdds) ? {
-      upOdds: polymarketService.latestMarket.upOdds,
-      downOdds: polymarketService.latestMarket.downOdds
-    } : null;
-
-    // 4. Perform Initial Multi-Timeframe Quant Analysis with True Strike & Odds
-    this.latestAnalysis = predictorEngine.analyzeMarket({
-      candles1m: this.candles1m,
-      candles5m: this.candles5m,
-      candles15m: this.candles15m,
-      currentPrice,
-      cvdData,
-      lockPrice: twapStrike,
-      polyOdds
-    });
-
-    this.renderTraderBrain(this.latestAnalysis);
-
-    // 5. Setup Subscriptions FIRST before initializing round
-    this.setupRoundSubscriptions();
+    // 4. Setup Event Listeners & Round Management
     this.setupDataSubscriptions();
+    this.setupRoundSubscriptions();
 
-    // 6. Initialize 5-Minute Round Manager with 60-Second TWAP Strike for Polymarket
-    roundManager.initRound(currentPrice, this.latestAnalysis, twapStrike);
-
-    // 6. Explicitly render the active round on screen immediately
-    if (roundManager.currentRound) {
-      this.renderRoundStarted(roundManager.currentRound);
-    }
-
-    // 7. Connect Data Stream
-    dataService.connectWebSocket();
-
-    // 8. Initialize Chainlink Oracle & Snipe Intelligence
-    chainlinkService.start(() => this.prevPrice || 75000);
-    chainlinkService.subscribe((data) => this.renderChainlinkOracle(data));
-
-    // 9. Initialize Polymarket Real-Time Service
-    polymarketService.subscribe((market) => this.renderPolymarketLive(market));
-    polymarketService.start();
-
-    // 10. Initial History & Bankroll Render
-    this.renderHistory(roundManager.history);
-    this.renderBankroll(roundManager.getStats());
+    // 5. Initialize the First 5-Minute Round with Exact TWAP Strike
+    this.startInitialRound();
   }
 
-  calculate60sTWAP(candles1m, fallbackPrice) {
-    if (!candles1m || candles1m.length === 0) return fallbackPrice;
-
-    const nowSec = Math.floor(Date.now() / 1000);
-    const roundStartSec = Math.floor(nowSec / 300) * 300;
-
-    // 1. Look for the candle at roundStartSec - 60 (the 60s lookback candle immediately preceding round start)
-    const lookbackCandle = candles1m.find(c => c.time === roundStartSec - 60);
-    if (lookbackCandle) {
-      return parseFloat(lookbackCandle.close.toFixed(2));
-    }
-
-    // 2. Look for the candle at roundStartSec (the opening candle of this 5m window)
-    const roundOpenCandle = candles1m.find(c => c.time === roundStartSec);
-    if (roundOpenCandle) {
-      return parseFloat(roundOpenCandle.open.toFixed(2));
-    }
-
-    // 3. Fallback: Find nearest candle before or at roundStartSec
-    const priorCandles = candles1m.filter(c => c.time <= roundStartSec);
-    if (priorCandles.length > 0) {
-      const nearest = priorCandles[priorCandles.length - 1];
-      return parseFloat(nearest.close.toFixed(2));
-    }
-
-    return fallbackPrice;
-  }
-
-  cacheDom() {
+  cacheDOMElements() {
     this.dom = {
-      livePrice: document.getElementById('live-btc-price'),
-      liveFeedLabel: document.getElementById('live-feed-label'),
-      chartHeaderTitle: document.getElementById('chart-header-title'),
-      chartHeaderSubtitle: document.getElementById('chart-header-subtitle'),
-      priceChange: document.getElementById('live-price-change'),
-      high24h: document.getElementById('ticker-24h-high'),
-      low24h: document.getElementById('ticker-24h-low'),
-      wsBadge: document.getElementById('ws-status-badge'),
-      wsText: document.getElementById('ws-status-text'),
+      // Top Ticker
+      liveBtcPrice: document.getElementById('live-btc-price'),
+      livePriceChange: document.getElementById('live-price-change'),
+      currentRoundTag: document.getElementById('current-round-tag'),
+      roundPhaseTag: document.getElementById('round-phase-tag'),
+      wsStatusBadge: document.getElementById('ws-status-badge'),
+      wsStatusText: document.getElementById('ws-status-text'),
       wsLatency: document.getElementById('ws-latency'),
-      audioBtn: document.getElementById('audio-toggle-btn'),
-      soundIconOn: document.getElementById('sound-icon-on'),
-      soundIconOff: document.getElementById('sound-icon-off'),
-      utcClock: document.getElementById('live-utc-clock'),
-      feedBtnPoly: document.getElementById('feed-btn-poly'),
-      feedBtnBnc: document.getElementById('feed-btn-bnc'),
+      liveUtcClock: document.getElementById('live-utc-clock'),
 
-      // Polymarket Widget
-      polyEventTitle: document.getElementById('poly-event-title'),
-      polyUpPrice: document.getElementById('poly-up-price'),
-      polyUpPct: document.getElementById('poly-up-pct'),
-      polyDownPrice: document.getElementById('poly-down-price'),
-      polyDownPct: document.getElementById('poly-down-pct'),
-      polyExternalLink: document.getElementById('poly-external-link'),
-      polyLastSync: document.getElementById('poly-last-sync'),
+      // Master Pro Trader Signal Card (Single Source of Truth)
+      masterSignalCard: document.getElementById('master-signal-card'),
+      signalEdgeBadge: document.getElementById('signal-edge-badge'),
+      signalPhasePill: document.getElementById('signal-phase-pill'),
+      signalIcon: document.getElementById('signal-icon'),
+      signalHeadline: document.getElementById('signal-headline'),
+      signalSubtext: document.getElementById('signal-subtext'),
+      signalConfidence: document.getElementById('signal-confidence'),
 
-      // Round Hero & Badges
-      roundTitle: document.getElementById('round-title-id'),
+      // Round Arena
+      roundTitleId: document.getElementById('round-title-id'),
       regimeBadge: document.getElementById('regime-badge'),
-      mtfDot15m: document.getElementById('mtf-dot-15m'),
-      mtfDot5m: document.getElementById('mtf-dot-5m'),
-      mtfDot1m: document.getElementById('mtf-dot-1m'),
-      radialProgress: document.getElementById('radial-progress-circle'),
       countdownDigits: document.getElementById('countdown-digits'),
-      lockPrice: document.getElementById('round-lock-price'),
+      radialProgressCircle: document.getElementById('radial-progress-circle'),
+      roundLockPrice: document.getElementById('round-lock-price'),
+      roundLivePrice: document.getElementById('round-live-price'),
+      roundPriceDelta: document.getElementById('round-price-delta'),
+      cushionRatioVal: document.getElementById('cushion-ratio-val'),
+      predictionStatusPill: document.getElementById('prediction-status-pill'),
+      cushionFill: document.getElementById('cushion-fill'),
+
+      // Strike Editing
       editStrikeBtn: document.getElementById('edit-strike-btn'),
       strikeEditForm: document.getElementById('strike-edit-form'),
       customStrikeInput: document.getElementById('custom-strike-input'),
       applyStrikeBtn: document.getElementById('apply-strike-btn'),
-      roundLivePrice: document.getElementById('round-live-price'),
-      roundDelta: document.getElementById('round-price-delta'),
-      predictionBanner: document.getElementById('prediction-banner'),
-      predictionIcon: document.getElementById('prediction-icon'),
-      predictionDir: document.getElementById('prediction-direction'),
-      predictionGrade: document.getElementById('prediction-grade'),
-      predictionConf: document.getElementById('prediction-confidence'),
-      targetPrice: document.getElementById('prediction-target-price'),
-      predictionStatusTag: document.getElementById('prediction-status-tag'),
-      predictionStatusText: document.getElementById('prediction-status-text'),
-      actionBanner: document.getElementById('actionable-trade-banner'),
-      actionBadgePill: document.getElementById('action-badge-pill'),
-      actionBadgeEdge: document.getElementById('action-badge-edge'),
-      actionBadgeDesc: document.getElementById('action-badge-desc'),
-      probUpText: document.getElementById('prob-up-text'),
-      probDownText: document.getElementById('prob-down-text'),
-      probBarFill: document.getElementById('probability-bar-fill'),
 
-      // Trader Brain
-      valRsi: document.getElementById('val-rsi'),
-      barRsi: document.getElementById('bar-rsi'),
-      badgeRsi: document.getElementById('badge-rsi'),
-      valMacd: document.getElementById('val-macd'),
-      barMacd: document.getElementById('bar-macd'),
-      badgeMacd: document.getElementById('badge-macd'),
-      valEma: document.getElementById('val-ema'),
-      badgeEma: document.getElementById('badge-ema'),
-      valAdx: document.getElementById('val-adx'),
-      barAdx: document.getElementById('bar-adx'),
-      badgeAdx: document.getElementById('badge-adx'),
-      valVwap: document.getElementById('val-vwap'),
-      barVwap: document.getElementById('bar-vwap'),
-      badgeVwap: document.getElementById('badge-vwap'),
+      // Indicators Grid
+      valSupertrend: document.getElementById('val-supertrend'),
+      barSupertrend: document.getElementById('bar-supertrend'),
+      badgeSupertrend: document.getElementById('badge-supertrend'),
+
       valCvd: document.getElementById('val-cvd'),
       barCvd: document.getElementById('bar-cvd'),
       badgeCvd: document.getElementById('badge-cvd'),
-      valChainlink: document.getElementById('val-chainlink'),
-      barChainlink: document.getElementById('bar-chainlink'),
-      badgeChainlink: document.getElementById('badge-chainlink'),
-      clOraclePrice: document.getElementById('cl-oracle-price'),
-      clUpdateTime: document.getElementById('cl-update-time'),
-      clOracleDrift: document.getElementById('cl-oracle-drift'),
-      clDriftStatus: document.getElementById('cl-drift-status'),
-      clSnipeBadge: document.getElementById('cl-snipe-badge'),
-      clSnipeStatus: document.getElementById('cl-snipe-status'),
-      rationaleList: document.getElementById('trader-rationale-list'),
 
-      // Bankroll
-      bankrollBalance: document.getElementById('bankroll-balance'),
-      bankrollWinrate: document.getElementById('bankroll-winrate'),
-      bankrollStreak: document.getElementById('bankroll-streak'),
-      stakeInput: document.getElementById('round-stake-input'),
-      autotradeBtn: document.getElementById('autotrade-btn'),
-      autotradeLabel: document.getElementById('autotrade-label'),
-      resetBankrollBtn: document.getElementById('reset-bankroll-btn'),
+      valVwap: document.getElementById('val-vwap'),
+      barVwap: document.getElementById('bar-vwap'),
+      badgeVwap: document.getElementById('badge-vwap'),
+
+      valCycle: document.getElementById('val-cycle'),
+      barCycle: document.getElementById('bar-cycle'),
+      badgeCycle: document.getElementById('badge-cycle'),
+
+      valAtr: document.getElementById('val-atr'),
+      barAtr: document.getElementById('bar-atr'),
+      badgeAtr: document.getElementById('badge-atr'),
+
+      valPolymarket: document.getElementById('val-polymarket'),
+      barPolymarket: document.getElementById('bar-polymarket'),
+      badgePolymarket: document.getElementById('badge-polymarket'),
+
+      // Rationale List
+      traderRationaleList: document.getElementById('trader-rationale-list'),
 
       // History
+      histSniperWinrate: document.getElementById('hist-sniper-winrate'),
       histTotalRounds: document.getElementById('hist-total-rounds'),
       histTotalWins: document.getElementById('hist-total-wins'),
       histTotalLosses: document.getElementById('hist-total-losses'),
-      histTotalPnl: document.getElementById('hist-total-pnl'),
       historyTableBody: document.getElementById('history-table-body'),
 
-      // Chart TF
-      tfBtns: document.querySelectorAll('.tf-btn')
-    };
+      // Audio Toggle
+      audioToggleBtn: document.getElementById('audio-toggle-btn'),
+      soundIconOn: document.getElementById('sound-icon-on'),
+      soundIconOff: document.getElementById('sound-icon-off'),
 
-    // Set initial audio icon state
-    this.updateAudioButtonState();
+      // Timeframe Buttons
+      tfButtons: document.querySelectorAll('.tf-btn')
+    };
   }
 
   bindEvents() {
     // Audio Toggle
-    this.dom.audioBtn.addEventListener('click', () => {
-      const isMuted = audioService.toggleMute();
-      this.updateAudioButtonState();
-      if (!isMuted) audioService.playTick();
-    });
+    if (this.dom.audioToggleBtn) {
+      this.dom.audioToggleBtn.addEventListener('click', () => {
+        this.audioEnabled = !this.audioEnabled;
+        audioService.enabled = this.audioEnabled;
+        if (this.audioEnabled) {
+          this.dom.soundIconOn?.classList.remove('hidden');
+          this.dom.soundIconOff?.classList.add('hidden');
+        } else {
+          this.dom.soundIconOn?.classList.add('hidden');
+          this.dom.soundIconOff?.classList.remove('hidden');
+        }
+      });
+    }
 
-    // Auto Trade Toggle
-    this.dom.autotradeBtn.addEventListener('click', () => {
-      const enabled = roundManager.toggleAutoTrade();
-      this.dom.autotradeBtn.classList.toggle('active', enabled);
-      this.dom.autotradeBtn.classList.toggle('inactive', !enabled);
-      this.dom.autotradeLabel.textContent = enabled ? 'ON' : 'OFF';
-      audioService.playTick();
-    });
-
-    // Stake Input
-    this.dom.stakeInput.addEventListener('change', (e) => {
-      roundManager.setStake(e.target.value);
-    });
-
-    // Reset Bankroll
-    this.dom.resetBankrollBtn.addEventListener('click', () => {
-      roundManager.resetBankroll();
-      this.renderBankroll(roundManager.getStats());
-      this.renderHistory(roundManager.history);
-      audioService.playTick();
-    });
-
-    // Price to Beat (Strike) Manual Sync & Edit
+    // Custom Strike Edit Toggle
     if (this.dom.editStrikeBtn) {
       this.dom.editStrikeBtn.addEventListener('click', () => {
-        this.dom.strikeEditForm.classList.toggle('hidden');
-        if (!this.dom.strikeEditForm.classList.contains('hidden')) {
-          this.dom.customStrikeInput.value = roundManager.currentRound ? roundManager.currentRound.lockPrice : '';
-          this.dom.customStrikeInput.focus();
+        this.dom.strikeEditForm?.classList.toggle('hidden');
+        if (!this.dom.strikeEditForm?.classList.contains('hidden')) {
+          this.dom.customStrikeInput?.focus();
         }
       });
     }
 
     if (this.dom.applyStrikeBtn) {
       this.dom.applyStrikeBtn.addEventListener('click', () => {
-        const val = parseFloat(this.dom.customStrikeInput.value);
-        if (!isNaN(val) && val > 0) {
-          roundManager.setLockPrice(val);
-          this.dom.lockPrice.textContent = `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-          this.dom.strikeEditForm.classList.add('hidden');
-          audioService.playTick();
+        const customVal = parseFloat(this.dom.customStrikeInput?.value);
+        if (!isNaN(customVal) && customVal > 0 && proTraderEngine.currentRound) {
+          proTraderEngine.currentRound.lockPrice = customVal;
+          this.dom.roundLockPrice.textContent = `$${customVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+          this.chart.setLockPrice(customVal);
+          this.dom.strikeEditForm?.classList.add('hidden');
         }
       });
     }
 
-    if (this.dom.customStrikeInput) {
-      this.dom.customStrikeInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          this.dom.applyStrikeBtn.click();
-        }
+    // Chart Timeframe Switcher
+    if (this.dom.tfButtons) {
+      this.dom.tfButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          this.dom.tfButtons.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          const tf = btn.dataset.tf;
+          this.currentTimeframe = tf;
+          const candles = tf === '5m' ? marketData.candles5m : marketData.candles1m;
+          this.chart.setData(candles);
+        });
       });
     }
-
-    // Feed Source Selector (Polymarket BTC-USD vs Binance USDT)
-    if (this.dom.feedBtnPoly) {
-      this.dom.feedBtnPoly.addEventListener('click', () => {
-        this.switchFeed('POLYMARKET_USD');
-      });
-    }
-
-    if (this.dom.feedBtnBnc) {
-      this.dom.feedBtnBnc.addEventListener('click', () => {
-        this.switchFeed('BINANCE_USDT');
-      });
-    }
-
-    // Timeframe selector
-    this.dom.tfBtns.forEach(btn => {
-      btn.addEventListener('click', async () => {
-        this.dom.tfBtns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const tf = btn.getAttribute('data-tf');
-        this.activeTimeframe = tf;
-        const klines = await dataService.fetchHistoricalKlines(tf, 100);
-        if (klines && klines.length > 0) {
-          this.chart.setData(klines);
-        }
-      });
-    });
   }
 
-  async switchFeed(source) {
-    if (dataService.feedSource === source) return;
-    dataService.setFeedSource(source);
-
-    const isPoly = source === 'POLYMARKET_USD';
-    if (this.dom.feedBtnPoly) this.dom.feedBtnPoly.classList.toggle('active', isPoly);
-    if (this.dom.feedBtnBnc) this.dom.feedBtnBnc.classList.toggle('active', !isPoly);
-    if (this.dom.liveFeedLabel) {
-      this.dom.liveFeedLabel.textContent = isPoly ? 'BTC / USD (POLYMARKET)' : 'BTC / USDT (BINANCE)';
-    }
-    if (this.dom.chartHeaderTitle) {
-      this.dom.chartHeaderTitle.textContent = isPoly 
-        ? 'BTC/USD REAL-TIME CANDLESTICK CHART (POLYMARKET BENCHMARK)' 
-        : 'BTC/USDT REAL-TIME CANDLESTICK CHART (BINANCE)';
-    }
-    if (this.dom.chartHeaderSubtitle) {
-      this.dom.chartHeaderSubtitle.textContent = isPoly 
-        ? 'Coinbase Spot USD Feed with Polymarket 60s TWAP Strike & Target Overlays' 
-        : 'Direct Binance Tick Feed with Strike & Target Overlays';
-    }
-
-    // Refresh candles
-    try {
-      const [k1m, k5m, k15m] = await Promise.all([
-        dataService.fetchHistoricalKlines('1m', 120),
-        dataService.fetchHistoricalKlines('5m', 60),
-        dataService.fetchHistoricalKlines('15m', 30)
-      ]);
-      this.candles1m = k1m || [];
-      this.candles5m = k5m || [];
-      this.candles15m = k15m || [];
-      if (this.candles1m.length > 0) {
-        this.chart.setData(this.candles1m);
-        const last = this.candles1m[this.candles1m.length - 1];
-        this.prevPrice = last.close;
-        this.updateLivePriceDisplay(last.close);
+  startUTCClock() {
+    setInterval(() => {
+      if (this.dom.liveUtcClock) {
+        this.dom.liveUtcClock.textContent = `${new Date().toISOString().slice(11, 19)} UTC`;
       }
-      audioService.playTick();
-    } catch (e) {
-      console.error('Error refreshing candles on feed switch:', e);
-    }
+    }, 1000);
   }
 
-  renderPolymarketLive(market) {
-    if (!market) return;
-    if (this.dom.polyEventTitle) this.dom.polyEventTitle.textContent = market.title;
-    if (this.dom.polyUpPrice) this.dom.polyUpPrice.textContent = `${market.upPrice}¢`;
-    if (this.dom.polyUpPct) this.dom.polyUpPct.textContent = `(${market.upOdds}%)`;
-    if (this.dom.polyDownPrice) this.dom.polyDownPrice.textContent = `${market.downPrice}¢`;
-    if (this.dom.polyDownPct) this.dom.polyDownPct.textContent = `(${market.downOdds}%)`;
-    if (this.dom.polyExternalLink && market.polymarketUrl) {
-      this.dom.polyExternalLink.href = market.polymarketUrl;
-    }
-    if (this.dom.polyLastSync) {
-      this.dom.polyLastSync.textContent = `Synced at ${market.lastUpdated}`;
-    }
-  }
+  startInitialRound() {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const roundStartSec = nowSec - (nowSec % 300);
+    const twapStrike = marketData.calculate60sTWAP(roundStartSec);
+    const cvd = marketData.getCumulativeVolumeDelta(60);
 
-  updateAudioButtonState() {
-    const isMuted = audioService.isMuted;
-    this.dom.audioBtn.classList.toggle('muted', isMuted);
-    if (isMuted) {
-      this.dom.soundIconOn.classList.add('hidden');
-      this.dom.soundIconOff.classList.remove('hidden');
-    } else {
-      this.dom.soundIconOn.classList.remove('hidden');
-      this.dom.soundIconOff.classList.add('hidden');
-    }
-  }
+    const initialAnalysis = quantEngine.synthesize({
+      candles1m: marketData.candles1m,
+      candles5m: marketData.candles5m,
+      candles15m: marketData.candles15m,
+      currentPrice: marketData.currentPrice,
+      lockPrice: twapStrike,
+      cvdData: cvd,
+      polyOdds: null
+    });
 
-  initClock() {
-    const update = () => {
-      const now = new Date();
-      this.dom.utcClock.textContent = now.toUTCString().split(' ')[4] + ' UTC';
-    };
-    update();
-    setInterval(update, 1000);
+    proTraderEngine.initRound(marketData.currentPrice, initialAnalysis, twapStrike);
   }
 
   setupDataSubscriptions() {
-    // Tick Trades
-    dataService.subscribe('tick', (trade) => {
-      const price = trade.price;
-      this.updateLivePriceDisplay(price);
-
-      // Update current candle on chart in real-time
-      if (this.candles1m.length > 0) {
-        const lastCandle = this.candles1m[this.candles1m.length - 1];
-        lastCandle.close = price;
-        lastCandle.high = Math.max(lastCandle.high, price);
-        lastCandle.low = Math.min(lastCandle.low, price);
-        lastCandle.volume += trade.quantity;
-        this.chart.updateCandle(lastCandle);
-      }
-
-      // Smoothly update round manager's price without triggering full tick cycle
-      roundManager.updateCurrentPrice(price);
-
-      // Smoothly update live strike comparison on round banner
-      if (roundManager.currentRound) {
-        this.dom.roundLivePrice.textContent = `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        const lockPrice = roundManager.currentRound.lockPrice;
-        if (lockPrice > 0) {
-          const delta = price - lockPrice;
-          const deltaPct = (delta / lockPrice) * 100;
-          const isPos = delta >= 0;
-          this.dom.roundDelta.textContent = `${isPos ? '+' : ''}$${delta.toFixed(2)} (${isPos ? '+' : ''}${deltaPct.toFixed(3)}%)`;
-          this.dom.roundDelta.className = `delta-badge ${isPos ? 'positive' : 'negative'}`;
-        }
-      }
+    // 1. Live Microsecond Ticks
+    marketData.on('tick', (trade) => {
+      this.renderLivePrice(trade.price);
+      proTraderEngine.updateLivePrice(trade.price);
     });
 
-    // 1-Minute Kline Updates
-    dataService.subscribe('kline1m', (candle) => {
-      if (this.candles1m.length === 0) {
-        this.candles1m.push(candle);
-      } else {
-        const last = this.candles1m[this.candles1m.length - 1];
-        if (last.time === candle.time) {
-          this.candles1m[this.candles1m.length - 1] = candle;
-        } else {
-          this.candles1m.push(candle);
-          if (this.candles1m.length > 150) this.candles1m.shift();
-        }
+    // 2. 1-Minute Candle Updates
+    marketData.on('kline_1m', (candle) => {
+      if (this.currentTimeframe === '1m') {
+        this.chart.updateCandle(candle);
       }
 
-      this.chart.updateCandle(candle);
-
-      // Throttle Quant Analysis to prevent UI freezing/stutter (every 3 seconds or on new candle close)
+      // Run Quant Analysis throttle every 2 seconds or on candle close
       const now = Date.now();
-      if (!this.lastQuantTime || now - this.lastQuantTime >= 3000 || candle.isClosed) {
-        this.lastQuantTime = now;
-        const cvdData = dataService.getCumulativeVolumeDelta(60);
-        const lockPrice = roundManager.currentRound ? roundManager.currentRound.lockPrice : null;
-        const polyOdds = (polymarketService.latestMarket && polymarketService.latestMarket.upOdds) ? {
-          upOdds: polymarketService.latestMarket.upOdds,
-          downOdds: polymarketService.latestMarket.downOdds
-        } : null;
-
-        this.latestAnalysis = predictorEngine.analyzeMarket({
-          candles1m: this.candles1m,
-          candles5m: this.candles5m,
-          candles15m: this.candles15m,
-          currentPrice: candle.close,
-          cvdData,
-          lockPrice,
-          polyOdds
-        });
-
-        roundManager.updatePrediction(this.latestAnalysis);
-        this.renderTraderBrain(this.latestAnalysis);
+      if (now - this.lastQuantScan >= 2000 || candle.isClosed) {
+        this.lastQuantScan = now;
+        this.executeQuantScan();
       }
     });
 
-    // 5-Minute Kline Updates
-    dataService.subscribe('kline5m', (candle) => {
-      if (this.candles5m.length === 0) {
-        this.candles5m.push(candle);
-      } else {
-        const last = this.candles5m[this.candles5m.length - 1];
-        if (last.time === candle.time) {
-          this.candles5m[this.candles5m.length - 1] = candle;
-        } else {
-          this.candles5m.push(candle);
-          if (this.candles5m.length > 80) this.candles5m.shift();
-        }
+    // 3. 5-Minute Candle Updates
+    marketData.on('kline_5m', (candle) => {
+      if (this.currentTimeframe === '5m') {
+        this.chart.updateCandle(candle);
       }
     });
 
-    // 15-Minute Kline Updates
-    dataService.subscribe('kline15m', (candle) => {
-      if (this.candles15m.length === 0) {
-        this.candles15m.push(candle);
-      } else {
-        const last = this.candles15m[this.candles15m.length - 1];
-        if (last.time === candle.time) {
-          this.candles15m[this.candles15m.length - 1] = candle;
-        } else {
-          this.candles15m.push(candle);
-          if (this.candles15m.length > 50) this.candles15m.shift();
-        }
-      }
-    });
-
-    // 24H Ticker Updates
-    dataService.subscribe('ticker', (ticker) => {
-      this.dom.high24h.textContent = `$${ticker.high24h.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-      this.dom.low24h.textContent = `$${ticker.low24h.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-
-      const isPos = ticker.changePercent >= 0;
-      this.dom.priceChange.textContent = `${isPos ? '+' : ''}${ticker.changePercent.toFixed(2)}%`;
-      this.dom.priceChange.className = `change-pill ${isPos ? 'positive' : 'negative'}`;
-    });
-
-    // WebSocket Status
-    dataService.subscribe('status', ({ status, latency }) => {
-      if (status.startsWith('CONNECTED')) {
-        this.dom.wsBadge.className = 'status-indicator-pill live';
-        this.dom.wsText.textContent = 'LIVE';
-        this.dom.wsLatency.textContent = `${latency}ms`;
-      } else {
-        this.dom.wsBadge.className = 'status-indicator-pill disconnected';
-        this.dom.wsText.textContent = status;
-        this.dom.wsLatency.textContent = '--';
+    // 4. WebSocket Connection Health
+    marketData.on('connection', (conn) => {
+      if (this.dom.wsStatusText) this.dom.wsStatusText.textContent = conn.status;
+      if (this.dom.wsLatency) this.dom.wsLatency.textContent = `${conn.latencyMs}ms`;
+      if (this.dom.wsStatusBadge) {
+        this.dom.wsStatusBadge.className = `status-indicator-pill ${conn.status === 'ONLINE' ? 'live' : 'reconnecting'}`;
       }
     });
   }
 
-  updateLivePriceDisplay(price) {
-    if (!price || isNaN(price)) return;
-    const formatted = `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    this.dom.livePrice.textContent = formatted;
+  executeQuantScan() {
+    if (!proTraderEngine.currentRound) return;
 
-    const now = Date.now();
-    if (this.prevPrice && (!this.lastFlashTime || now - this.lastFlashTime >= 350)) {
-      if (price > this.prevPrice) {
-        this.dom.livePrice.classList.add('price-flash-up');
-        this.dom.livePrice.classList.remove('price-flash-down');
-        this.lastFlashTime = now;
-      } else if (price < this.prevPrice) {
-        this.dom.livePrice.classList.add('price-flash-down');
-        this.dom.livePrice.classList.remove('price-flash-up');
-        this.lastFlashTime = now;
-      }
+    const lockPrice = proTraderEngine.currentRound.lockPrice;
+    const cvd = marketData.getCumulativeVolumeDelta(60);
 
-      clearTimeout(this.flashTimer);
-      this.flashTimer = setTimeout(() => {
-        this.dom.livePrice.classList.remove('price-flash-up', 'price-flash-down');
-      }, 250);
-    }
-    this.prevPrice = price;
+    const analysis = quantEngine.synthesize({
+      candles1m: marketData.candles1m,
+      candles5m: marketData.candles5m,
+      candles15m: marketData.candles15m,
+      currentPrice: marketData.currentPrice,
+      lockPrice,
+      cvdData: cvd,
+      polyOdds: null
+    });
+
+    proTraderEngine.updateAnalysis(analysis);
+    this.renderQuantIndicators(analysis);
   }
 
   setupRoundSubscriptions() {
-    roundManager.subscribe((event) => {
-      if (event.type === 'ROUND_STARTED' || event.type === 'ROUND_UPDATED') {
+    proTraderEngine.subscribe((event) => {
+      if (event.type === 'ROUND_STARTED') {
         this.renderRoundStarted(event.round);
-      } else if (event.type === 'TICK') {
+      } else if (event.type === 'ROUND_TICK') {
         this.renderRoundTick(event.round);
       } else if (event.type === 'ROUND_SETTLED') {
         this.renderRoundSettled(event.result, event.history);
       } else if (event.type === 'REQUEST_NEXT_ROUND') {
-        // Formulate fresh prediction for the new 5m round with exact 60s TWAP Strike
-        const currentPrice = event.lastClosePrice || dataService.currentPrice;
-        const cvdData = dataService.getCumulativeVolumeDelta(60);
-        const twapStrike = this.calculate60sTWAP(this.candles1m, currentPrice);
-        const polyOdds = (polymarketService.latestMarket && polymarketService.latestMarket.upOdds) ? {
-          upOdds: polymarketService.latestMarket.upOdds,
-          downOdds: polymarketService.latestMarket.downOdds
-        } : null;
-
-        this.latestAnalysis = predictorEngine.analyzeMarket({
-          candles1m: this.candles1m,
-          candles5m: this.candles5m,
-          candles15m: this.candles15m,
-          currentPrice,
-          cvdData,
-          lockPrice: twapStrike,
-          polyOdds
-        });
-        roundManager.initRound(currentPrice, this.latestAnalysis, twapStrike);
+        this.startInitialRound();
       }
     });
   }
 
+  renderLivePrice(price) {
+    if (!this.dom.liveBtcPrice) return;
+
+    this.dom.liveBtcPrice.textContent = `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    if (this.prevPrice) {
+      const isHigher = price >= this.prevPrice;
+      this.dom.liveBtcPrice.classList.remove('price-flash-up', 'price-flash-down');
+      void this.dom.liveBtcPrice.offsetWidth; // trigger reflow
+      this.dom.liveBtcPrice.classList.add(isHigher ? 'price-flash-up' : 'price-flash-down');
+    }
+    this.prevPrice = price;
+  }
+
   renderRoundStarted(round) {
-    this.dom.roundTitle.textContent = `ROUND #${round.id}`;
-    this.dom.lockPrice.textContent = `$${round.lockPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    this.dom.roundLivePrice.textContent = `$${round.currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-    // Prediction Banner
-    const isUp = round.prediction === 'UP';
-    this.dom.predictionBanner.className = `prediction-banner ${isUp ? 'banner-up' : 'banner-down'}`;
-    this.dom.predictionIcon.textContent = isUp ? '▲' : '▼';
-    this.dom.predictionDir.textContent = isUp ? 'UP (CALL)' : 'DOWN (PUT)';
-    this.dom.predictionConf.textContent = `${round.confidence}%`;
-    this.dom.targetPrice.textContent = `$${round.targetPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-
-    // Actionable Trade Advisor
-    if (this.dom.actionBanner && round.actionBadge) {
-      this.dom.actionBanner.className = `actionable-trade-banner ${round.actionClass || 'action-neutral'}`;
-      if (this.dom.actionBadgePill) this.dom.actionBadgePill.textContent = round.actionBadge;
-      if (this.dom.actionBadgeDesc) this.dom.actionBadgeDesc.textContent = round.actionSubtitle || 'Evaluating quant order flow...';
-      if (this.dom.actionBadgeEdge) {
-        this.dom.actionBadgeEdge.textContent = round.recommendation === 'SKIP_NO_EDGE' ? 'NO EDGE (CHOP)' : `${round.confidence || 78}% WIN EDGE`;
-      }
+    // 1. Update Title & Badges
+    if (this.dom.roundTitleId) this.dom.roundTitleId.textContent = `ROUND #${round.id}`;
+    if (this.dom.currentRoundTag) this.dom.currentRoundTag.textContent = round.id;
+    if (this.dom.roundLockPrice) {
+      this.dom.roundLockPrice.textContent = `$${round.lockPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
 
-    // Set chart lines
-    this.chart.setLockPrice(round.lockPrice);
-    this.chart.setTargetPrice(round.targetPrice, round.prediction);
+    // 2. Set Chart Strike Line
+    if (this.chart) {
+      this.chart.setLockPrice(round.lockPrice);
+    }
+
+    // 3. Audio Notification
+    if (this.audioEnabled) {
+      audioService.playRoundStart();
+    }
+
+    // 4. Update UI Components
+    this.renderMasterSignal(round);
   }
 
   renderRoundTick(round) {
-    if (!round) return;
-
-    // Self-healing: if round lock price, title, or target is placeholder, fill it immediately
-    if (this.dom.lockPrice.textContent.includes('--') || 
-        this.dom.roundTitle.textContent.includes('-----') ||
-        this.dom.predictionConf.textContent.includes('--')) {
-      this.renderRoundStarted(round);
-    }
-
     // 1. Countdown Time & Radial Ring
     const mins = Math.floor(round.secondsRemaining / 60);
     const secs = round.secondsRemaining % 60;
-    this.dom.countdownDigits.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-
-    // Circumference = 2 * PI * 62 ≈ 390
-    const circumference = 390;
-    const progress = round.secondsRemaining / 300;
-    const offset = circumference * (1 - progress);
-    this.dom.radialProgress.style.strokeDashoffset = offset;
-
-    // Ring Warning Color
-    if (round.secondsRemaining <= 30) {
-      this.dom.radialProgress.setAttribute('class', 'radial-fg-circle danger');
-    } else if (round.secondsRemaining <= 60) {
-      this.dom.radialProgress.setAttribute('class', 'radial-fg-circle warning');
-    } else {
-      this.dom.radialProgress.setAttribute('class', 'radial-fg-circle');
+    if (this.dom.countdownDigits) {
+      this.dom.countdownDigits.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     }
 
-    // 2. Price comparator
-    this.dom.roundLivePrice.textContent = `$${round.currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    if (this.dom.radialProgressCircle) {
+      const circumference = 390;
+      const progress = round.secondsRemaining / 300;
+      const offset = circumference * (1 - progress);
+      this.dom.radialProgressCircle.style.strokeDashoffset = offset;
 
-    const delta = round.liveProb.currentDelta;
-    const deltaPercent = round.liveProb.currentDeltaPercent;
-    const isPositive = delta >= 0;
-
-    this.dom.roundDelta.textContent = `${isPositive ? '+' : ''}$${delta.toFixed(2)} (${isPositive ? '+' : ''}${deltaPercent.toFixed(3)}%)`;
-    this.dom.roundDelta.className = `delta-badge ${isPositive ? 'positive' : 'negative'}`;
-
-    // 3. Prediction status (Winning vs Losing) against LOCKED prediction
-    const isWinning = round.liveProb.isPredictionWinning;
-    this.dom.predictionStatusTag.className = `prediction-status-pill ${isWinning ? 'winning' : 'losing'}`;
-    this.dom.predictionStatusText.textContent = isWinning ? 'ON TRACK (WINNING)' : 'AT RISK (BELOW STRIKE)';
-
-    // Synchronize Banner with LOCKED Round Prediction (Firm signal that does not flip)
-    const isPredUp = round.prediction === 'UP';
-    this.dom.predictionDir.textContent = isPredUp ? 'UP (CALL)' : 'DOWN (PUT)';
-    this.dom.predictionIcon.textContent = isPredUp ? '▲' : '▼';
-    this.dom.predictionBanner.className = `prediction-banner ${isPredUp ? 'banner-up' : 'banner-down'}`;
-    this.dom.predictionGrade.textContent = round.grade || 'GRADE A (CONVICTION)';
-    this.dom.predictionGrade.className = `conviction-grade-pill ${round.gradeColor || 'grade-a'}`;
-    this.dom.predictionConf.textContent = `${round.confidence || 78}%`;
-
-    // Actionable Trade Advisor Banner Live Sync
-    if (this.dom.actionBanner && round.actionBadge) {
-      this.dom.actionBanner.className = `actionable-trade-banner ${round.actionClass || 'action-neutral'}`;
-      if (this.dom.actionBadgePill) this.dom.actionBadgePill.textContent = round.actionBadge;
-      if (this.dom.actionBadgeDesc) this.dom.actionBadgeDesc.textContent = round.actionSubtitle || 'Evaluating quant order flow...';
-      if (this.dom.actionBadgeEdge) {
-        this.dom.actionBadgeEdge.textContent = round.recommendation === 'SKIP_NO_EDGE' ? 'NO EDGE (CHOP)' : `${round.confidence || 78}% WIN EDGE`;
-      }
-    }
-
-    // 4. Probability Meter
-    this.dom.probUpText.textContent = `${round.liveProb.upProb}%`;
-    this.dom.probDownText.textContent = `${round.liveProb.downProb}%`;
-    this.dom.probBarFill.style.width = `${round.liveProb.upProb}%`;
-
-    // 5. Chainlink Oracle Snipe Integration (Informational badge only - does NOT overwrite locked prediction)
-    if (round.liveProb && round.liveProb.chainlinkSnipe && this.dom.clSnipeBadge) {
-      const snipe = round.liveProb.chainlinkSnipe;
-      if (snipe.isSnipeActive) {
-        const isUp = snipe.snipeDirection === 'UP';
-        this.dom.clSnipeBadge.className = isUp ? 'snipe-badge active' : 'snipe-badge active-bear';
-        this.dom.clSnipeStatus.textContent = `🔥 T-60s ORACLE LEAN: ${snipe.snipeDirection} (${snipe.snipeConfidence}%)`;
-      } else if (round.secondsRemaining <= 65) {
-        this.dom.clSnipeBadge.className = 'snipe-badge waiting';
-        this.dom.clSnipeStatus.textContent = `EVALUATING (T-${round.secondsRemaining}s)`;
+      if (round.secondsRemaining <= 30) {
+        this.dom.radialProgressCircle.setAttribute('class', 'radial-fg-circle danger');
+      } else if (round.secondsRemaining <= 60) {
+        this.dom.radialProgressCircle.setAttribute('class', 'radial-fg-circle warning');
       } else {
-        this.dom.clSnipeBadge.className = 'snipe-badge waiting';
-        const minsLeft = Math.floor(round.secondsRemaining / 60);
-        const secsLeft = round.secondsRemaining % 60;
-        this.dom.clSnipeStatus.textContent = `UNLOCKS AT T-60s (${minsLeft}m ${secsLeft}s)`;
+        this.dom.radialProgressCircle.setAttribute('class', 'radial-fg-circle');
       }
+    }
+
+    // 2. Live Price & Delta vs Strike
+    if (this.dom.roundLivePrice) {
+      this.dom.roundLivePrice.textContent = `$${round.currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+
+    if (this.dom.roundPriceDelta) {
+      const delta = round.liveDelta || 0;
+      const pct = round.liveDeltaPercent || 0;
+      const isPositive = delta >= 0;
+      this.dom.roundPriceDelta.textContent = `${isPositive ? '+' : ''}$${delta.toFixed(2)} (${isPositive ? '+' : ''}${pct.toFixed(3)}%)`;
+      this.dom.roundPriceDelta.className = `delta-badge ${isPositive ? 'positive' : 'negative'}`;
+    }
+
+    // 3. Distance Cushion Meter
+    if (this.dom.cushionRatioVal && round.metrics) {
+      const atr = round.metrics.atr5m || 200;
+      const delta = Math.abs(round.liveDelta || 0);
+      const ratio = (delta / atr) * 100;
+      const isPositive = (round.liveDelta || 0) >= 0;
+
+      if (ratio >= 35) {
+        this.dom.cushionRatioVal.textContent = `${isPositive ? '+' : '-'}${ratio.toFixed(1)}% ATR [DOMINANT ${isPositive ? 'BULL' : 'BEAR'} BREAKOUT]`;
+      } else if (ratio >= 20) {
+        this.dom.cushionRatioVal.textContent = `${isPositive ? '+' : '-'}${ratio.toFixed(1)}% ATR [SOLID CUSHION]`;
+      } else {
+        this.dom.cushionRatioVal.textContent = `${isPositive ? '+' : '-'}${ratio.toFixed(1)}% ATR [50/50 NOISE ZONE]`;
+      }
+
+      if (this.dom.cushionFill) {
+        const fillWidth = Math.min(100, Math.max(10, ratio * 1.5));
+        this.dom.cushionFill.style.width = `${fillWidth}%`;
+        this.dom.cushionFill.className = `cushion-fill ${isPositive ? 'bull' : 'bear'}`;
+      }
+    }
+
+    // 4. On Track / At Risk Status
+    if (this.dom.predictionStatusPill) {
+      const isWinning = round.isWinning;
+      this.dom.predictionStatusPill.className = `prediction-status-pill ${isWinning ? 'winning' : 'losing'}`;
+      this.dom.predictionStatusPill.textContent = isWinning ? 'ON TRACK (WINNING)' : 'AT RISK (OPPOSITE STRIKE)';
+    }
+
+    // 5. Update Phase Badge
+    if (this.dom.roundPhaseTag) {
+      if (round.phase === 'OPENING_AUCTION') {
+        this.dom.roundPhaseTag.textContent = 'OPENING AUCTION';
+        this.dom.roundPhaseTag.className = 'phase-badge auction';
+      } else if (round.phase === 'ACTIVE_SNIPER') {
+        this.dom.roundPhaseTag.textContent = 'SNIPER ACTIVE';
+        this.dom.roundPhaseTag.className = 'phase-badge sniper';
+      } else {
+        this.dom.roundPhaseTag.textContent = 'EXPIRY LOCKED';
+        this.dom.roundPhaseTag.className = 'phase-badge sniper';
+      }
+    }
+
+    // 6. Refresh Master Signal Card
+    this.renderMasterSignal(round);
+  }
+
+  renderMasterSignal(round) {
+    if (!this.dom.masterSignalCard) return;
+
+    this.dom.masterSignalCard.className = `master-signal-card ${round.actionClass || 'action-neutral'}`;
+
+    if (this.dom.signalHeadline) this.dom.signalHeadline.textContent = round.actionBadge || 'ANALYZING ORDER FLOW...';
+    if (this.dom.signalSubtext) this.dom.signalSubtext.textContent = round.actionSubtitle || 'Evaluating multi-timeframe order flow';
+    if (this.dom.signalConfidence) this.dom.signalConfidence.textContent = `${round.confidence || 75}%`;
+    if (this.dom.signalEdgeBadge) this.dom.signalEdgeBadge.textContent = round.winEdge || 'EVALUATING';
+
+    if (this.dom.signalPhasePill) {
+      if (round.phase === 'OPENING_AUCTION') {
+        this.dom.signalPhasePill.textContent = `PHASE 1: AUCTION (${round.secondsRemaining > 255 ? round.secondsRemaining - 255 : 0}s)`;
+      } else if (round.phase === 'ACTIVE_SNIPER') {
+        this.dom.signalPhasePill.textContent = 'PHASE 2: 90% SNIPER ACTIVE';
+      } else {
+        this.dom.signalPhasePill.textContent = 'PHASE 3: EXPIRY LOCK';
+      }
+    }
+
+    if (this.dom.signalIcon) {
+      if (round.actionClass === 'action-up') this.dom.signalIcon.textContent = '▲';
+      else if (round.actionClass === 'action-down') this.dom.signalIcon.textContent = '▼';
+      else this.dom.signalIcon.textContent = '⚡';
     }
   }
 
-  renderChainlinkOracle(data) {
-    if (!data) return;
-    if (this.dom.clOraclePrice) {
-      this.dom.clOraclePrice.textContent = `$${data.chainlinkPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    }
-    if (this.dom.clUpdateTime) {
-      this.dom.clUpdateTime.textContent = `${data.oracleHeartbeatSec}s AGO (${data.lastUpdated})`;
-    }
-    if (this.dom.clOracleDrift) {
-      const isLead = data.drift > 0;
-      const isLag = data.drift < 0;
-      this.dom.clOracleDrift.textContent = `${isLead ? '+' : ''}$${data.drift.toFixed(2)} (${isLead ? '+' : ''}${data.driftBps} bps)`;
-      this.dom.clOracleDrift.className = `drift-val ${isLead ? 'bull' : (isLag ? 'bear' : 'neutral')}`;
+  renderQuantIndicators(analysis) {
+    const m = analysis.metrics || {};
 
-      if (Math.abs(data.drift) >= 5) {
-        this.dom.clDriftStatus.textContent = isLead ? 'BINANCE LEADING 🟢' : 'ORACLE LAGGING 🔴';
-        this.dom.clDriftStatus.className = `drift-status ${isLead ? 'lead' : 'lag'}`;
-      } else {
-        this.dom.clDriftStatus.textContent = 'IN SYNC ⚖️';
-        this.dom.clDriftStatus.className = 'drift-status sync';
+    // SuperTrend
+    if (this.dom.valSupertrend) this.dom.valSupertrend.textContent = `${m.st15m || 'BULL'} / ${m.st5m || 'BULL'}`;
+    if (this.dom.badgeSupertrend) {
+      const isBull = m.st5m === 'BULLISH';
+      this.dom.badgeSupertrend.textContent = isBull ? 'BULL TREND' : 'BEAR TREND';
+      this.dom.badgeSupertrend.className = `ind-badge ${isBull ? 'bull' : 'bear'}`;
+      if (this.dom.barSupertrend) this.dom.barSupertrend.className = `pill-bar-fill ${isBull ? 'bull' : 'bear'}`;
+    }
+
+    // CVD
+    if (this.dom.valCvd && analysis.metrics) {
+      const cvd = marketData.getCumulativeVolumeDelta(60);
+      const ratio = cvd.deltaRatio;
+      this.dom.valCvd.textContent = `${ratio >= 0 ? '+' : ''}${(ratio * 100).toFixed(0)}% DELTA`;
+      if (this.dom.badgeCvd) {
+        const isBull = ratio >= 0;
+        this.dom.badgeCvd.textContent = isBull ? 'TAKER BUYS' : 'TAKER SELLS';
+        this.dom.badgeCvd.className = `ind-badge ${isBull ? 'bull' : 'bear'}`;
+        if (this.dom.barCvd) {
+          this.dom.barCvd.style.width = `${Math.min(100, Math.abs(ratio) * 100 + 20)}%`;
+          this.dom.barCvd.className = `pill-bar-fill ${isBull ? 'bull' : 'bear'}`;
+        }
       }
     }
 
-    if (this.dom.valChainlink) {
-      this.dom.valChainlink.textContent = `$${data.chainlinkPrice.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-      this.dom.badgeChainlink.textContent = data.drift > 0 ? 'BULL DRIFT' : (data.drift < 0 ? 'BEAR DRIFT' : 'SYNCED');
-      this.dom.badgeChainlink.className = `ind-badge ${data.drift > 0 ? 'bull' : (data.drift < 0 ? 'bear' : 'neutral')}`;
+    // VWAP
+    if (this.dom.valVwap && m.vwap) {
+      this.dom.valVwap.textContent = `$${m.vwap.toLocaleString()}`;
+    }
+
+    // Run Cycle
+    if (this.dom.valCycle) {
+      if (m.greenRun > 0) {
+        this.dom.valCycle.textContent = `${m.greenRun} GREEN BARS`;
+        if (this.dom.badgeCycle) {
+          this.dom.badgeCycle.textContent = m.greenRun >= 3 ? '70.8% PULLBACK RISK' : 'EXPANSION';
+          this.dom.badgeCycle.className = `ind-badge ${m.greenRun >= 3 ? 'bear' : 'bull'}`;
+        }
+      } else if (m.redRun > 0) {
+        this.dom.valCycle.textContent = `${m.redRun} RED BARS`;
+        if (this.dom.badgeCycle) {
+          this.dom.badgeCycle.textContent = m.redRun >= 3 ? '70.2% BOUNCE EDGE' : 'BREAKDOWN';
+          this.dom.badgeCycle.className = `ind-badge ${m.redRun >= 3 ? 'bull' : 'bear'}`;
+        }
+      } else {
+        this.dom.valCycle.textContent = 'CONSOLIDATION';
+        if (this.dom.badgeCycle) {
+          this.dom.badgeCycle.textContent = 'NEUTRAL';
+          this.dom.badgeCycle.className = 'ind-badge neutral';
+        }
+      }
+    }
+
+    // ATR Volatility
+    if (this.dom.valAtr && m.atr5m) {
+      this.dom.valAtr.textContent = `$${m.atr5m} ATR`;
+    }
+
+    // Rationale List
+    if (this.dom.traderRationaleList && analysis.confluences) {
+      this.dom.traderRationaleList.innerHTML = '';
+      analysis.confluences.slice(0, 5).forEach(c => {
+        const li = document.createElement('li');
+        li.textContent = c;
+        this.dom.traderRationaleList.appendChild(li);
+      });
     }
   }
 
   renderRoundSettled(result, history) {
-    this.renderHistory(history);
-    this.renderBankroll(roundManager.getStats());
-  }
-
-  renderTraderBrain(analysis) {
-    if (!analysis) return;
-
-    // RSI
-    const rsi = analysis.indicators.rsi;
-    this.dom.valRsi.textContent = rsi.toFixed(1);
-    this.dom.barRsi.style.width = `${Math.min(100, Math.max(0, rsi))}%`;
-    if (rsi < 35) {
-      this.dom.badgeRsi.className = 'ind-badge bull';
-      this.dom.badgeRsi.textContent = 'OVERSOLD';
-      this.dom.barRsi.className = 'pill-bar-fill bull';
-    } else if (rsi > 65) {
-      this.dom.badgeRsi.className = 'ind-badge bear';
-      this.dom.badgeRsi.textContent = 'OVERBOUGHT';
-      this.dom.barRsi.className = 'pill-bar-fill bear';
-    } else {
-      this.dom.badgeRsi.className = 'ind-badge neutral';
-      this.dom.badgeRsi.textContent = 'NEUTRAL';
-      this.dom.barRsi.className = 'pill-bar-fill';
+    if (this.audioEnabled) {
+      if (result.isWin) audioService.playWin();
+      else audioService.playLoss();
     }
 
-    // MACD
-    const hist = analysis.indicators.macdHist;
-    this.dom.valMacd.textContent = `${hist >= 0 ? '+' : ''}${hist.toFixed(2)}`;
-    const macdPct = Math.min(100, Math.max(0, 50 + hist * 3));
-    this.dom.barMacd.style.width = `${macdPct}%`;
-    if (hist > 0) {
-      this.dom.badgeMacd.className = 'ind-badge bull';
-      this.dom.badgeMacd.textContent = 'BULLISH';
-      this.dom.barMacd.className = 'pill-bar-fill bull';
-    } else {
-      this.dom.badgeMacd.className = 'ind-badge bear';
-      this.dom.badgeMacd.textContent = 'BEARISH';
-      this.dom.barMacd.className = 'pill-bar-fill bear';
-    }
+    const stats = proTraderEngine.getStats();
 
-    // EMA
-    const ema9 = analysis.indicators.ema9;
-    const ema21 = analysis.indicators.ema21;
-    const isEmaBull = ema9 >= ema21;
-    this.dom.valEma.textContent = isEmaBull ? '9 > 21 BULL' : '9 < 21 BEAR';
-    this.dom.badgeEma.className = `ind-badge ${isEmaBull ? 'bull' : 'bear'}`;
-    this.dom.badgeEma.textContent = isEmaBull ? 'UPTREND' : 'DOWNTREND';
+    if (this.dom.histSniperWinrate) this.dom.histSniperWinrate.textContent = `${stats.filteredWinRate}%`;
+    if (this.dom.histTotalRounds) this.dom.histTotalRounds.textContent = stats.total;
+    if (this.dom.histTotalWins) this.dom.histTotalWins.textContent = stats.wins;
+    if (this.dom.histTotalLosses) this.dom.histTotalLosses.textContent = stats.losses;
 
-    // CVD
-    const cvdRatio = analysis.indicators.cvdRatio;
-    this.dom.valCvd.textContent = `${cvdRatio >= 0 ? '+' : ''}${(cvdRatio * 100).toFixed(0)}% DELTA`;
-    const cvdPct = Math.min(100, Math.max(0, 50 + cvdRatio * 50));
-    this.dom.barCvd.style.width = `${cvdPct}%`;
-    if (cvdRatio > 0.05) {
-      this.dom.badgeCvd.className = 'ind-badge bull';
-      this.dom.badgeCvd.textContent = 'BUY PRESSURE';
-      this.dom.barCvd.className = 'pill-bar-fill bull';
-    } else if (cvdRatio < -0.05) {
-      this.dom.badgeCvd.className = 'ind-badge bear';
-      this.dom.badgeCvd.textContent = 'SELL PRESSURE';
-      this.dom.barCvd.className = 'pill-bar-fill bear';
-    } else {
-      this.dom.badgeCvd.className = 'ind-badge neutral';
-      this.dom.badgeCvd.textContent = 'BALANCED';
-      this.dom.barCvd.className = 'pill-bar-fill';
-    }
+    if (this.dom.historyTableBody) {
+      this.dom.historyTableBody.innerHTML = '';
+      history.slice(0, 15).forEach(h => {
+        const tr = document.createElement('tr');
+        const isWin = h.isWin;
+        const wasSkipped = h.recommendation === 'SKIP_NO_EDGE';
 
-    // Rationale list
-    if (analysis.rationale && analysis.rationale.length > 0) {
-      this.dom.rationaleList.innerHTML = analysis.rationale
-        .map(text => `<li>${text}</li>`)
-        .join('');
-    }
-  }
-
-  renderBankroll(stats) {
-    this.dom.bankrollBalance.textContent = `$${stats.bankroll.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    this.dom.bankrollWinrate.textContent = `${stats.winRate}%`;
-    this.dom.bankrollStreak.textContent = `🔥 ${stats.streak} Wins`;
-
-    this.dom.autotradeBtn.classList.toggle('active', roundManager.autoTradeEnabled);
-    this.dom.autotradeBtn.classList.toggle('inactive', !roundManager.autoTradeEnabled);
-    this.dom.autotradeLabel.textContent = roundManager.autoTradeEnabled ? 'ON' : 'OFF';
-  }
-
-  renderHistory(history) {
-    const stats = roundManager.getStats();
-    this.dom.histTotalRounds.textContent = stats.total;
-    this.dom.histTotalWins.textContent = stats.wins;
-    this.dom.histTotalLosses.textContent = stats.losses;
-    
-    const pnlVal = stats.totalPnl;
-    const isPositive = pnlVal >= 0;
-    this.dom.histTotalPnl.textContent = `${isPositive ? '+' : ''}$${Math.abs(pnlVal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    this.dom.histTotalPnl.parentElement.className = `summary-pill pnl-pill ${isPositive ? 'win-pill' : 'loss-pill'}`;
-
-    if (!history || history.length === 0) {
-      this.dom.historyTableBody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding: 20px;">No rounds recorded yet</td></tr>';
-      return;
-    }
-
-    this.dom.historyTableBody.innerHTML = history.slice(0, 15).map(r => {
-      const isWin = r.isWin;
-      const isUp = r.prediction === 'UP';
-      const actualIsUp = r.actualOutcome === 'UP';
-      const deltaPos = r.delta >= 0;
-      const dateStr = new Date(r.endTime * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-      return `
-        <tr>
-          <td class="round-id-cell">#${r.id}</td>
-          <td>${dateStr}</td>
-          <td>$${r.lockPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-          <td>$${r.closePrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-          <td class="${deltaPos ? 'dir-cell up' : 'dir-cell down'}">${deltaPos ? '+' : ''}$${r.delta.toFixed(2)}</td>
-          <td class="dir-cell ${isUp ? 'up' : 'down'}">${isUp ? '▲ UP' : '▼ DOWN'}</td>
-          <td class="dir-cell ${actualIsUp ? 'up' : 'down'}">${actualIsUp ? '▲ UP' : '▼ DOWN'}</td>
+        tr.innerHTML = `
+          <td><span class="hist-id">${h.id}</span></td>
+          <td>${new Date(h.settledAt).toLocaleTimeString()}</td>
+          <td>$${h.lockPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+          <td>$${h.closePrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+          <td class="${h.delta >= 0 ? 'hist-delta-bull' : 'hist-delta-bear'}">${h.delta >= 0 ? '+' : ''}$${h.delta.toFixed(2)}</td>
+          <td><span class="hist-pred ${h.prediction === 'UP' ? 'pred-up' : 'pred-down'}">${h.prediction}</span></td>
+          <td><span class="hist-actual ${h.actualOutcome === 'UP' ? 'act-up' : 'act-down'}">${h.actualOutcome}</span></td>
           <td>
-            <span class="pill-outcome ${isWin ? 'win' : 'loss'}">${isWin ? 'WON' : 'LOST'}</span>
+            ${wasSkipped 
+              ? '<span class="status-chip skip">SKIPPED CHOP</span>' 
+              : isWin 
+                ? '<span class="status-chip win">✅ WIN (90% SNIPER)</span>' 
+                : '<span class="status-chip loss">❌ LOSS</span>'
+            }
           </td>
-          <td class="pnl-cell ${isWin ? 'win' : 'loss'}">${isWin ? '+' : ''}$${r.pnl.toFixed(2)}</td>
-        </tr>
-      `;
-    }).join('');
+        `;
+        this.dom.historyTableBody.appendChild(tr);
+      });
+    }
   }
 }
 
-// Bootstrap on DOM Ready
-document.addEventListener('DOMContentLoaded', () => {
-  const app = new App();
-  app.init();
+// Instantiate and launch the app
+const app = new ProTraderApp();
+window.addEventListener('DOMContentLoaded', () => {
+  app.start().catch(err => console.error('App launch error:', err));
 });
